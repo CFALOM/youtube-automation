@@ -18,52 +18,43 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install tools
+      - name: Install system tools
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg librsvg2-bin
+
+      - name: Install Python packages
+        run: |
           python -m pip install --upgrade pip
           python -m pip install piper-tts
 
       - name: Generate fact and script
         run: python generator.py
 
-      - name: Create visuals
-        run: python make_scenes.py
+      - name: Generate assets
+        run: python make_assets.py
 
       - name: Download Piper voice
         run: |
           mkdir -p voices
           python -m piper.download_voices en_US-lessac-medium --download-dir voices
 
-      - name: Generate narration
-        run: |
-          mkdir -p work/audio
-          piper \
-            --model voices/en_US-lessac-medium.onnx \
-            --output_file work/audio/narration.wav \
-            < work/script.txt
+      - name: Build video
+        run: python build_video.py
 
-      - name: Render video
+      - name: Render final video
         run: |
           chmod +x render.sh
           ./render.sh
 
-      - name: Add narration
+      - name: Show generated files
         run: |
-          ffmpeg -y \
-            -i work/video_no_audio.mp4 \
-            -i work/audio/narration.wav \
-            -map 0:v:0 \
-            -map 1:a:0 \
-            -c:v copy \
-            -c:a aac \
-            -b:a 128k \
-            -shortest \
-            work/viral-fact-short.mp4
+          echo "===== GENERATED FILES ====="
+          find . -maxdepth 4 -type f | sort
 
       - name: Save Short
         uses: actions/upload-artifact@v4
         with:
           name: short-video
-          path: viral_facts_shorts_v2/work/viral-fact-short.mp4
+          path: viral_facts_shorts_v2/**/*.mp4
+          if-no-files-found: error
