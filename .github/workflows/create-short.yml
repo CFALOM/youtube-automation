@@ -33,12 +33,14 @@ jobs:
 
       - name: Download Piper voice
         run: |
-          mkdir -p work/audio
-          piper.download_voices
+          mkdir -p voices
+          python -m piper.download_voices en_US-lessac-medium --download-dir voices
 
       - name: Generate narration
         run: |
-          piper --model en_US-lessac-medium \
+          mkdir -p work/audio
+          piper \
+            --model voices/en_US-lessac-medium.onnx \
             --output_file work/audio/narration.wav \
             < work/script.txt
 
