@@ -1,4 +1,4 @@
-name: AI Viral Facts Shorts Generator
+name: Final Viral Facts Shorts Automation
 
 on:
   workflow_dispatch:
@@ -7,7 +7,9 @@ permissions:
   contents: read
 
 jobs:
+
   build:
+
     runs-on: ubuntu-latest
 
     defaults:
@@ -15,27 +17,36 @@ jobs:
         working-directory: viral_facts_shorts_v2
 
     steps:
-      - name: Checkout
+
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install system tools
+
+      - name: Install FFmpeg
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg librsvg2-bin
+          sudo apt-get install -y ffmpeg
+
 
       - name: Install Python packages
         run: |
           python -m pip install --upgrade pip
-          python -m pip install piper-tts
+          python -m pip install requests piper-tts
 
-      - name: Generate fact and script
+
+      - name: Discover random internet fact
         run: |
           python generator.py
+
 
       - name: Download Piper voice
         run: |
           mkdir -p voices
-          python -m piper.download_voices en_US-lessac-medium --download-dir voices
+
+          python -m piper.download_voices \
+            en_US-lessac-medium \
+            --download-dir voices
+
 
       - name: Generate narration
         run: |
@@ -44,22 +55,36 @@ jobs:
             --output_file work/audio.wav \
             < work/script.txt
 
-      - name: Download visuals
+
+      - name: Find real visuals
+        env:
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
         run: |
           python make_assets.py
+
 
       - name: Build final Short
         run: |
           python build_video.py
 
-      - name: Check final video
-        run: |
-          ls -lh work/
-          test -f work/viral-fact-short.mp4
 
-      - name: Save Short
+      - name: Verify video
+        run: |
+          test -s work/viral-fact-short.mp4
+
+          ffprobe \
+            -v error \
+            -show_entries stream=width,height,duration \
+            -of default=noprint_wrappers=1 \
+            work/viral-fact-short.mp4
+
+
+      - name: Upload final Short
         uses: actions/upload-artifact@v4
+
         with:
-          name: short-video
-          path: viral_facts_shorts_v2/work/viral-fact-short.mp4
+          name: final-viral-short
+
+          path: viral_facts_shorts_final/work/viral-fact-short.mp4
+
           if-no-files-found: error
