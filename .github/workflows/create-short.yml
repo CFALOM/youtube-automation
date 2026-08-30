@@ -31,12 +31,13 @@ jobs:
       - name: Create visuals
         run: python make_scenes.py
 
-      - name: Generate voice
-        run: |
-          mkdir -p work/audio
-          piper --model en_US-lessac-medium \
-            --output_file work/audio/narration.wav \
-            < work/script.txt
+- name: Generate voice
+  run: |
+    mkdir -p work/audio
+    piper.download_voices
+    piper --model en_US-lessac-medium \
+      --output_file work/audio/narration.wav \
+      < work/script.txt
 
       - name: Render video
         run: |
