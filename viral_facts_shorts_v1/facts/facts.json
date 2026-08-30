@@ -1,0 +1,10 @@
+[
+ {"topic":"Space","fact":"A day on Venus is longer than a year on Venus.","detail":"Venus rotates so slowly that one rotation takes about 243 Earth days, while one trip around the Sun takes about 225 Earth days."},
+ {"topic":"Animals","fact":"Octopuses have three hearts.","detail":"Two hearts send blood toward the gills, while the third sends blood around the rest of the body."},
+ {"topic":"Earth","fact":"Lightning can heat air to temperatures hotter than the surface of the Sun.","detail":"A lightning channel can briefly reach roughly 30,000 kelvin, making the surrounding air expand extremely quickly."},
+ {"topic":"Animals","fact":"Some turtles can breathe through specialized tissue near their rear end.","detail":"Certain freshwater turtles can absorb oxygen through highly vascularized tissue while underwater."},
+ {"topic":"Space","fact":"On Mercury, one solar day lasts longer than its year.","detail":"Mercury rotates three times for every two orbits, so sunrise-to-sunrise takes about 176 Earth days while its year is about 88 days."},
+ {"topic":"Human Body","fact":"Your bones are living tissue.","detail":"Bone is constantly remodeled by specialized cells that remove old tissue and build new tissue."},
+ {"topic":"Animals","fact":"Crows can remember individual human faces.","detail":"Research has shown that crows can learn to recognize particular human faces and remember them for long periods."},
+ {"topic":"Ocean","fact":"There are underwater lakes on the seafloor.","detail":"Very salty brine can pool in depressions on the ocean floor, creating lake-like bodies beneath seawater."}
+]
