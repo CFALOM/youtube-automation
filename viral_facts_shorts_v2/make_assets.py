@@ -1,8 +1,9 @@
-import os
 import json
 import pathlib
-import requests
 import random
+import re
+import requests
+from urllib.parse import quote
 
 ROOT = pathlib.Path(__file__).parent
 WORK = ROOT / "work"
@@ -13,19 +14,12 @@ VIDEOS = WORK / "videos"
 IMAGES.mkdir(parents=True, exist_ok=True)
 VIDEOS.mkdir(parents=True, exist_ok=True)
 
+# Clean old visuals
 for file in IMAGES.glob("*"):
     file.unlink()
 
 for file in VIDEOS.glob("*"):
     file.unlink()
-
-API_KEY = os.environ.get("PEXELS_API_KEY")
-
-if not API_KEY:
-    raise RuntimeError(
-        "PEXELS_API_KEY is missing. "
-        "Add it under GitHub Settings → Secrets → Actions."
-    )
 
 selected = json.loads(
     (WORK / "selected.json").read_text(
@@ -33,16 +27,100 @@ selected = json.loads(
     )
 )
 
-terms = selected["visual_terms"]
+terms = selected.get("visual_terms", [])
 
-headers = {
-    "Authorization": API_KEY
-}
+if not terms:
+    terms = [
+        selected.get("topic", ""),
+        selected.get("title", "")
+    ]
+
+USER_AGENT = (
+    "ViralFactsShorts/2.0 "
+    "(automated educational video project)"
+)
 
 
-def download(url, path):
+def commons_search(query, limit=20):
+    """
+    Search Wikimedia Commons for real media.
+    No API key required.
+    """
+
+    url = "https://commons.wikimedia.org/w/api.php"
+
+    params = {
+        "action": "query",
+        "generator": "search",
+        "gsrsearch": query,
+        "gsrnamespace": 6,
+        "gsrlimit": limit,
+        "prop": "imageinfo",
+        "iiprop": "url|mime|size",
+        "iiurlwidth": 1080,
+        "format": "json"
+    }
+
     response = requests.get(
         url,
+        params=params,
+        headers={
+            "User-Agent": USER_AGENT
+        },
+        timeout=30
+    )
+
+    response.raise_for_status()
+
+    data = response.json()
+
+    pages = (
+        data
+        .get("query", {})
+        .get("pages", {})
+    )
+
+    results = []
+
+    for page in pages.values():
+
+        info = (
+            page
+            .get("imageinfo", [])
+        )
+
+        if not info:
+            continue
+
+        item = info[0]
+
+        original = item.get("url")
+        mime = item.get("mime", "")
+
+        if not original:
+            continue
+
+        results.append({
+            "title": page.get("title", ""),
+            "url": original,
+            "mime": mime
+        })
+
+    return results
+
+
+def download(url, output):
+
+    print(
+        "Downloading:",
+        url
+    )
+
+    response = requests.get(
+        url,
+        headers={
+            "User-Agent": USER_AGENT
+        },
         timeout=45
     )
 
@@ -51,208 +129,154 @@ def download(url, path):
     data = response.content
 
     if len(data) < 10000:
-        raise RuntimeError("Downloaded file is suspiciously small.")
+        raise RuntimeError(
+            "Downloaded file is too small."
+        )
 
-    path.write_bytes(data)
+    output.write_bytes(data)
 
 
-image_count = 0
-video_count = 0
+# ---------------------------------------------------------
+# FIND VISUALS
+# ---------------------------------------------------------
 
 random.shuffle(terms)
 
-# ---------------------------------------------------------
-# VIDEO SEARCH
-# ---------------------------------------------------------
+found_images = []
+seen_urls = set()
 
 for term in terms:
 
-    if video_count >= 4:
-        break
+    if not term:
+        continue
+
+    print()
+    print(
+        "Searching Wikimedia Commons:",
+        term
+    )
 
     try:
 
-        response = requests.get(
-            "https://api.pexels.com/videos/search",
-            headers=headers,
-            params={
-                "query": term,
-                "orientation": "portrait",
-                "size": "medium",
-                "per_page": 10,
-            },
-            timeout=25
+        results = commons_search(
+            term,
+            limit=20
         )
 
-        response.raise_for_status()
+    except Exception as error:
 
-        data = response.json()
+        print(
+            "Search failed:",
+            error
+        )
 
-        videos = data.get("videos", [])
+        continue
 
-        if not videos:
+    random.shuffle(results)
+
+    for result in results:
+
+        url = result["url"]
+
+        if url in seen_urls:
             continue
 
-        random.shuffle(videos)
+        seen_urls.add(url)
 
-        for video in videos:
+        mime = result["mime"].lower()
 
-            files = video.get(
-                "video_files",
-                []
-            )
+        # Only real image formats.
+        if not any(
+            x in mime
+            for x in [
+                "jpeg",
+                "jpg",
+                "png",
+                "webp"
+            ]
+        ):
+            continue
 
-            if not files:
-                continue
+        found_images.append(result)
 
-            # Prefer files reasonably suitable for Shorts.
-            files.sort(
-                key=lambda f:
-                abs(
-                    (
-                        f.get("width", 1)
-                        /
-                        max(f.get("height", 1), 1)
-                    )
-                    -
-                    (9 / 16)
-                )
-            )
+        print(
+            "Found:",
+            result["title"]
+        )
 
-            chosen = files[0]
+        if len(found_images) >= 8:
+            break
 
-            url = chosen.get("link")
+    if len(found_images) >= 8:
+        break
 
-            if not url:
-                continue
 
-            output = (
-                VIDEOS
-                /
-                f"video_{video_count:02d}.mp4"
-            )
+# ---------------------------------------------------------
+# DOWNLOAD IMAGES
+# ---------------------------------------------------------
 
-            try:
-                download(url, output)
+downloaded = 0
 
-                video_count += 1
+for result in found_images:
 
-                print(
-                    "Downloaded video:",
-                    term
-                )
+    if downloaded >= 8:
+        break
 
-                break
+    output = (
+        IMAGES
+        /
+        f"image_{downloaded:02d}.jpg"
+    )
 
-            except Exception as error:
-                print(
-                    "Video download failed:",
-                    error
-                )
+    try:
+
+        download(
+            result["url"],
+            output
+        )
+
+        downloaded += 1
 
     except Exception as error:
+
         print(
-            "Video search failed:",
-            term,
+            "Download failed:",
             error
         )
 
 
 # ---------------------------------------------------------
-# PHOTO SEARCH
+# RESULT
 # ---------------------------------------------------------
-
-for term in terms:
-
-    if image_count >= 6:
-        break
-
-    try:
-
-        response = requests.get(
-            "https://api.pexels.com/v1/search",
-            headers=headers,
-            params={
-                "query": term,
-                "orientation": "portrait",
-                "size": "large",
-                "per_page": 10,
-            },
-            timeout=25
-        )
-
-        response.raise_for_status()
-
-        data = response.json()
-
-        photos = data.get("photos", [])
-
-        if not photos:
-            continue
-
-        random.shuffle(photos)
-
-        for photo in photos:
-
-            source = photo.get(
-                "src",
-                {}
-            )
-
-            url = (
-                source.get("large2x")
-                or source.get("large")
-                or source.get("original")
-            )
-
-            if not url:
-                continue
-
-            output = (
-                IMAGES
-                /
-                f"image_{image_count:02d}.jpg"
-            )
-
-            try:
-                download(url, output)
-
-                image_count += 1
-
-                print(
-                    "Downloaded image:",
-                    term
-                )
-
-                break
-
-            except Exception as error:
-                print(
-                    "Image download failed:",
-                    error
-                )
-
-    except Exception as error:
-        print(
-            "Image search failed:",
-            term,
-            error
-        )
-
-
-total = image_count + video_count
 
 print()
 print("=" * 60)
-print("VISUALS FOUND")
-print("Photos:", image_count)
-print("Videos:", video_count)
-print("Total:", total)
+print("WIKIMEDIA VISUAL SEARCH COMPLETE")
 print("=" * 60)
 
-# Never silently make a garbage video.
-if total < 4:
+print(
+    "Images:",
+    downloaded
+)
+
+print(
+    "Videos:",
+    0
+)
+
+print(
+    "Total visuals:",
+    downloaded
+)
+
+print("=" * 60)
+
+
+# Don't create a bad Short.
+if downloaded < 4:
+
     raise RuntimeError(
-        f"Only {total} usable visuals were found. "
-        "The workflow stopped instead of creating a bad Short."
+        "Could not find at least 4 relevant Wikimedia Commons "
+        "images. Video creation stopped instead of producing "
+        "a Short with missing or generic visuals."
     )
