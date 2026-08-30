@@ -29,32 +29,37 @@ jobs:
           python -m pip install piper-tts
 
       - name: Generate fact and script
-        run: python generator.py
-
-      - name: Generate assets
-        run: python make_assets.py
+        run: |
+          python generator.py
 
       - name: Download Piper voice
         run: |
           mkdir -p voices
           python -m piper.download_voices en_US-lessac-medium --download-dir voices
 
-      - name: Build video
-        run: python build_video.py
-
-      - name: Render final video
+      - name: Generate narration
         run: |
-          chmod +x render.sh
-          ./render.sh
+          piper \
+            --model voices/en_US-lessac-medium.onnx \
+            --output_file work/audio.wav \
+            < work/script.txt
 
-      - name: Show generated files
+      - name: Download visuals
         run: |
-          echo "===== GENERATED FILES ====="
-          find . -maxdepth 4 -type f | sort
+          python make_assets.py
+
+      - name: Build final Short
+        run: |
+          python build_video.py
+
+      - name: Check final video
+        run: |
+          ls -lh work/
+          test -f work/viral-fact-short.mp4
 
       - name: Save Short
         uses: actions/upload-artifact@v4
         with:
           name: short-video
-          path: viral_facts_shorts_v2/**/*.mp4
+          path: viral_facts_shorts_v2/work/viral-fact-short.mp4
           if-no-files-found: error
