@@ -85,6 +85,6 @@ jobs:
         with:
           name: final-viral-short
 
-          path: viral_facts_shorts_final/work/viral-fact-short.mp4
+          path: path: viral_facts_shorts_v2/work/viral-fact-short.mp4
 
           if-no-files-found: error
