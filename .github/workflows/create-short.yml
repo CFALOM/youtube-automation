@@ -10,6 +10,10 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
+    defaults:
+      run:
+        working-directory: viral_facts_shorts_v1
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -56,4 +60,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: short-video
-          path: work/viral-fact-short.mp4
+          path: viral_facts_shorts_v1/work/viral-fact-short.mp4
