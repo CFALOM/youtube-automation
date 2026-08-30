@@ -1,4 +1,3 @@
-```python
 import json
 import os
 import random
@@ -705,11 +704,9 @@ print(
 )
 
 for term in visual_terms:
-
     print(
         "-",
         term
     )
 
 print("=" * 60)
-```
