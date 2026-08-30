@@ -1,4 +1,4 @@
-name: Create Viral Facts Short
+name: AI Viral Facts Shorts Generator
 
 on:
   workflow_dispatch:
@@ -12,7 +12,7 @@ jobs:
 
     defaults:
       run:
-        working-directory: viral_facts_shorts_v1
+        working-directory: viral_facts_shorts_v2
 
     steps:
       - name: Checkout
@@ -66,4 +66,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: short-video
-          path: viral_facts_shorts_v1/work/viral-fact-short.mp4
+          path: viral_facts_shorts_v2/work/viral-fact-short.mp4
