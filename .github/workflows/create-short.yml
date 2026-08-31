@@ -1,3 +1,4 @@
+
 name: AI Long Video Generator
 
 on:
@@ -8,18 +9,42 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg python3 python3-pip espeak-ng
+          sudo apt-get install -y ffmpeg espeak-ng
 
       - name: Install Python dependencies
         run: |
           python3 -m pip install --upgrade pip
-          pip3 install requests piper-tts
+          python3 -m pip install --disable-pip-version-check requests piper-tts
+
+      - name: Check project files
+        run: |
+          echo "Repository:"
+          pwd
+
+          echo
+          echo "Root files:"
+          ls -la
+
+          echo
+          echo "Project files:"
+          ls -la viral_facts_long_v1
+
+          echo
+          echo "Checking required files..."
+
+          test -f ./render.sh
+          test -f ./build_video.py
+          test -f ./viral_facts_long_v1/generator.py
+          test -f ./viral_facts_long_v1/make_assets.py
+
+          echo "All required files found."
 
       - name: Make render script executable
         run: chmod +x ./render.sh
@@ -27,27 +52,44 @@ jobs:
       - name: Run AI video factory
         run: ./render.sh all
 
-      - name: Check generated video
+      - name: Verify generated video
         run: |
-          echo "Checking output..."
-          ls -lh ./work/ || true
+          echo "Checking generated video..."
 
-          if [ ! -f "./work/final.mp4" ]; then
-            echo "ERROR: ./work/final.mp4 was not created."
-            echo "Available MP4 files:"
-            find . -type f -name "*.mp4" -print || true
+          VIDEO="./viral_facts_long_v1/work/final.mp4"
+
+          if [ ! -f "$VIDEO" ]; then
+            echo "ERROR: final.mp4 was not created."
+            echo
+            echo "Files currently in work directory:"
+            find ./viral_facts_long_v1/work -maxdepth 3 -type f -print | sort
             exit 1
           fi
 
-          echo "SUCCESS: ./work/final.mp4 exists."
-          ffprobe -v error \
-            -show_entries format=duration,size \
-            -of default=noprint_wrappers=1 \
-            ./work/final.mp4
+          echo
+          echo "SUCCESS: final.mp4 exists."
+          echo
+
+          ls -lh "$VIDEO"
 
       - name: Upload final video
         uses: actions/upload-artifact@v4
         with:
           name: generated-long-video
-          path: ./work/final.mp4
+          path: ./viral_facts_long_v1/work/final.mp4
           if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload project report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: video-generation-report
+          path: |
+            ./viral_facts_long_v1/work/report.json
+            ./viral_facts_long_v1/work/script.json
+            ./viral_facts_long_v1/work/scenes.json
+            ./viral_facts_long_v1/work/assets.json
+          if-no-files-found: ignore
+          retention-days: 7
+
