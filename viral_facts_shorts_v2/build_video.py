@@ -1,503 +1,542 @@
+import json
 import pathlib
 import subprocess
-import wave
+import random
 import math
 import re
 
 ROOT = pathlib.Path(__file__).parent
 WORK = ROOT / "work"
 
-AUDIO = WORK / "audio.wav"
-SCRIPT = WORK / "script.txt"
 IMAGES = WORK / "images"
+AUDIO = WORK / "audio.wav"
 
-W = 1080
-H = 1920
+OUTPUT = WORK / "viral-fact-short.mp4"
+
 FPS = 30
+WIDTH = 1080
+HEIGHT = 1920
 
 
-# ============================================================
-# AUDIO DURATION
-# ============================================================
+# =========================================================
+# HELPERS
+# =========================================================
+
+def run(cmd):
+    print()
+    print("RUNNING:")
+    print(" ".join(str(x) for x in cmd))
+
+    subprocess.run(
+        cmd,
+        check=True
+    )
+
+
+def ffprobe_duration(path):
+    result = subprocess.run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            str(path),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    return float(result.stdout.strip())
+
+
+def escape_drawtext(text):
+    text = text.replace("\\", "\\\\")
+    text = text.replace(":", "\\:")
+    text = text.replace("'", "\\'")
+    text = text.replace("%", "\\%")
+    text = text.replace("[", "\\[")
+    text = text.replace("]", "\\]")
+    text = text.replace(",", "\\,")
+    return text
+
+
+# =========================================================
+# CHECK INPUTS
+# =========================================================
 
 if not AUDIO.exists():
-
     raise RuntimeError(
         "work/audio.wav does not exist."
     )
 
+image_files = sorted(
+    IMAGES.glob("*")
+)
 
-with wave.open(
-    str(AUDIO),
-    "rb"
-) as f:
-
-    duration = (
-        f.getnframes()
-        /
-        f.getframerate()
+if len(image_files) < 4:
+    raise RuntimeError(
+        f"Only {len(image_files)} images available."
     )
 
+script_path = WORK / "script.txt"
 
-# ============================================================
-# SCRIPT
-# ============================================================
+if not script_path.exists():
+    raise RuntimeError(
+        "work/script.txt does not exist."
+    )
 
-parts = [
-    x.strip()
-    for x in SCRIPT.read_text(
-        encoding="utf-8"
-    ).splitlines()
-    if x.strip()
-]
+script = script_path.read_text(
+    encoding="utf-8"
+).strip()
 
-
-if not parts:
-
+if not script:
     raise RuntimeError(
         "script.txt is empty."
     )
 
 
-# ============================================================
-# WEIGHT TIMELINE
-# ============================================================
+# =========================================================
+# LOAD SELECTED FACT
+# =========================================================
 
+selected_path = WORK / "selected.json"
+
+if not selected_path.exists():
+    raise RuntimeError(
+        "work/selected.json does not exist."
+    )
+
+selected = json.loads(
+    selected_path.read_text(
+        encoding="utf-8"
+    )
+)
+
+title = selected.get(
+    "title",
+    "UNKNOWN FACT"
+)
+
+topic = selected.get(
+    "topic",
+    ""
+)
+
+
+# =========================================================
+# AUDIO DURATION
+# =========================================================
+
+duration = ffprobe_duration(
+    AUDIO
+)
+
+if duration <= 0:
+    raise RuntimeError(
+        "Audio has invalid duration."
+    )
+
+print()
+print("=" * 60)
+print("VIDEO BUILDER")
+print("=" * 60)
+print("Topic:", topic)
+print("Title:", title)
+print("Audio:", duration, "seconds")
+print("Images:", len(image_files))
+print("=" * 60)
+
+
+# =========================================================
+# SPLIT SCRIPT
+# =========================================================
+
+lines = [
+    x.strip()
+    for x in script.splitlines()
+    if x.strip()
+]
+
+if not lines:
+    raise RuntimeError(
+        "No usable narration lines."
+    )
+
+
+# Don't let a single line dominate the whole video.
+# Give each line a reasonable amount of screen time.
 weights = []
 
-for text in parts:
+for line in lines:
 
-    words = len(
-        text.split()
+    word_count = max(
+        1,
+        len(line.split())
     )
 
     weights.append(
-        max(
-            1,
-            words
-        )
+        max(1, word_count)
     )
 
+total_weight = sum(weights)
 
-total = sum(
-    weights
-)
+durations = []
+
+for weight in weights:
+
+    d = duration * (
+        weight / total_weight
+    )
+
+    # Prevent extremely short scenes.
+    d = max(
+        1.15,
+        d
+    )
+
+    durations.append(d)
 
 
-timeline = []
+# Normalize durations to exact audio duration.
+scale = duration / sum(durations)
 
-current = 0.0
+durations = [
+    d * scale
+    for d in durations
+]
 
-for text, weight in zip(
-    parts,
-    weights
+
+# =========================================================
+# CREATE SCENES
+# =========================================================
+
+scenes = WORK / "scenes"
+scenes.mkdir(exist_ok=True)
+
+for old in scenes.glob("scene_*.mp4"):
+    try:
+        old.unlink()
+    except Exception:
+        pass
+
+
+scene_files = []
+
+
+# Use images cyclically if narration has more scenes.
+# This is much better than leaving sections static.
+random.shuffle(image_files)
+
+
+for index, (line, scene_duration) in enumerate(
+    zip(lines, durations)
 ):
 
-    scene_duration = (
-        duration
-        *
-        weight
-        /
-        total
-    )
-
-    timeline.append(
-        (
-            current,
-            current + scene_duration,
-            text
-        )
-    )
-
-    current += scene_duration
-
-
-# ============================================================
-# IMAGES
-# ============================================================
-
-images = sorted(
-    IMAGES.glob(
-        "*.jpg"
-    )
-)
-
-
-if len(images) < 4:
-
-    raise RuntimeError(
-        "Not enough visuals."
-    )
-
-
-# ============================================================
-# MAKE SCENES
-# ============================================================
-
-scenes = []
-
-
-for i, (
-    start,
-    end,
-    text
-) in enumerate(timeline):
-
-    scene_duration = max(
-        0.7,
-        end - start
-    )
-
-    image = images[
-        i % len(images)
+    image = image_files[
+        index % len(image_files)
     ]
 
     output = (
-        WORK
-        /
-        f"scene_{i:02d}.mp4"
+        scenes /
+        f"scene_{index:02d}.mp4"
     )
 
+    # Slightly different movement per scene.
+    zoom_start = random.choice([
+        "1.00",
+        "1.02",
+        "1.04",
+    ])
 
-    # ========================================================
-    # SAFE VERTICAL IMAGE FIT
-    # ========================================================
+    zoom_speed = random.choice([
+        "0.0009",
+        "0.0012",
+        "0.0015",
+    ])
+
+    # IMPORTANT:
     #
-    # The image is enlarged until it completely covers
-    # 1080x1920, then cropped safely.
+    # scale2ref + pad is used instead of a blind
+    # 1080x1920 crop.
     #
-    # This prevents the previous:
-    # "Invalid too big or non positive crop size" error.
+    # This means the image is NEVER required to be
+    # 1080x1920 before rendering.
     #
-
-    if i % 3 == 0:
-
-        motion = (
-            "zoompan="
-            "z='min(zoom+0.0018,1.14)':"
-            "x='iw/2-(iw/zoom/2)':"
-            "y='ih/2-(ih/zoom/2)':"
-            "d=1:"
-            "s=1080x1920:"
-            "fps=30"
-        )
-
-    elif i % 3 == 1:
-
-        motion = (
-            "zoompan="
-            "z='min(zoom+0.0015,1.12)':"
-            "x='iw/2-(iw/zoom/2)+"
-            "35*sin(on/18)':"
-            "y='ih/2-(ih/zoom/2)':"
-            "d=1:"
-            "s=1080x1920:"
-            "fps=30"
-        )
-
-    else:
-
-        motion = (
-            "zoompan="
-            "z='min(zoom+0.0020,1.16)':"
-            "x='iw/2-(iw/zoom/2)':"
-            "y='ih/2-(ih/zoom/2)+"
-            "25*sin(on/16)':"
-            "d=1:"
-            "s=1080x1920:"
-            "fps=30"
-        )
-
+    # The important image content stays visible.
 
     vf = (
-        "scale="
-        "1080:1920:"
-        "force_original_aspect_ratio=increase,"
-        "crop=1080:1920,"
-        + motion
-        + ","
-        "eq=saturation=1.08:"
+        "scale=1080:1920:force_original_aspect_ratio=decrease,"
+        "pad=1080:1920:(ow-iw)/2:(oh-ih)/2,"
+        f"zoompan="
+        f"z='min({zoom_start}+on*{zoom_speed},1.10)':"
+        "x='iw/2-(iw/zoom/2)':"
+        "y='ih/2-(ih/zoom/2)':"
+        "d=1:"
+        "s=1080x1920:"
+        f"fps={FPS},"
+        "eq="
+        "saturation=1.08:"
         "contrast=1.04,"
         "format=yuv420p"
     )
 
-
-    subprocess.run(
-        [
-            "ffmpeg",
-            "-y",
-            "-loglevel",
-            "error",
-
-            "-loop",
-            "1",
-
-            "-i",
-            str(image),
-
-            "-vf",
-            vf,
-
-            "-t",
-            str(scene_duration),
-
-            "-an",
-
-            "-c:v",
-            "libx264",
-
-            "-preset",
-            "veryfast",
-
-            "-crf",
-            "23",
-
-            "-pix_fmt",
-            "yuv420p",
-
-            str(output),
-        ],
-        check=True
-    )
-
-
-    scenes.append(
-        output
-    )
-
-
-# ============================================================
-# CONCAT
-# ============================================================
-
-concat_file = (
-    WORK /
-    "concat.txt"
-)
-
-
-concat_file.write_text(
-    "\n".join(
-        "file '"
-        +
-        str(scene.resolve())
-        +
-        "'"
-        for scene in scenes
-    ),
-    encoding="utf-8"
-)
-
-
-silent = (
-    WORK /
-    "silent.mp4"
-)
-
-
-subprocess.run(
-    [
+    run([
         "ffmpeg",
         "-y",
         "-loglevel",
         "error",
-
-        "-f",
-        "concat",
-
-        "-safe",
-        "0",
-
+        "-loop",
+        "1",
         "-i",
-        str(concat_file),
+        str(image),
+        "-vf",
+        vf,
+        "-t",
+        str(scene_duration),
+        "-an",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "23",
+        "-pix_fmt",
+        "yuv420p",
+        str(output),
+    ])
 
-        "-c",
-        "copy",
-
-        str(silent),
-    ],
-    check=True
-)
-
-
-# ============================================================
-# ASS CAPTIONS
-# ============================================================
-
-def timestamp(seconds):
-
-    hours = int(
-        seconds // 3600
-    )
-
-    minutes = int(
-        (seconds % 3600)
-        // 60
-    )
-
-    secs = (
-        seconds
-        % 60
-    )
-
-    return (
-        f"{hours}:"
-        f"{minutes:02d}:"
-        f"{secs:05.2f}"
-    )
+    scene_files.append(output)
 
 
-# ============================================================
-# CAPTION HEADER
-# ============================================================
+# =========================================================
+# CONCAT SCENES
+# =========================================================
 
-ass_header = """[Script Info]
-ScriptType: v4.00+
-PlayResX: 1080
-PlayResY: 1920
-ScaledBorderAndShadow: yes
+concat_file = WORK / "concat.txt"
 
-[V4+ Styles]
-Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding
-Style: Main,Arial,64,&H00FFFFFF,&H00FFFFFF,&H00000000,&HCC000000,1,0,1,5,2,5,100,100,400,1
+with concat_file.open(
+    "w",
+    encoding="utf-8"
+) as f:
 
-[Events]
-Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
-"""
+    for scene in scene_files:
+
+        path = str(
+            scene.resolve()
+        ).replace(
+            "'",
+            "'\\''"
+        )
+
+        f.write(
+            f"file '{path}'\n"
+        )
 
 
-events = []
+joined = WORK / "joined.mp4"
+
+run([
+    "ffmpeg",
+    "-y",
+    "-loglevel",
+    "error",
+    "-f",
+    "concat",
+    "-safe",
+    "0",
+    "-i",
+    str(concat_file),
+    "-c",
+    "copy",
+    str(joined),
+])
 
 
-# ============================================================
-# WORD GROUP CAPTIONS
-# ============================================================
+# =========================================================
+# CAPTION TEXT
+# =========================================================
 
-for start, end, text in timeline:
+# We intentionally keep captions inside a SAFE AREA.
+#
+# x=80 means 80 pixels from left.
+# x=1000 means approximately 80 pixels from right.
+#
+# This prevents:
+# MINECRAFT
+# becoming
+# NEC
 
-    words = text.split()
+captioned = WORK / "captioned.mp4"
 
-    if not words:
+# Build caption filter using ASS-style drawtext.
+#
+# Instead of putting the entire sentence in one tiny line,
+# break it into short chunks.
+
+caption_filters = []
+
+current_time = 0.0
+
+for index, (line, scene_duration) in enumerate(
+    zip(lines, durations)
+):
+
+    # Break long text into manageable chunks.
+    words = line.split()
+
+    chunks = []
+
+    current = []
+
+    for word in words:
+
+        current.append(word)
+
+        if len(" ".join(current)) >= 22:
+            chunks.append(
+                " ".join(current)
+            )
+            current = []
+
+    if current:
+        chunks.append(
+            " ".join(current)
+        )
+
+    if not chunks:
         continue
 
+    chunk_duration = scene_duration / len(chunks)
 
-    # 3 words per caption.
-    group_size = 3
+    for chunk_index, chunk in enumerate(chunks):
 
-    groups = []
-
-    for i in range(
-        0,
-        len(words),
-        group_size
-    ):
-
-        group = words[
-            i:i + group_size
-        ]
-
-        groups.append(
-            " ".join(group)
+        start = (
+            current_time +
+            chunk_index * chunk_duration
         )
 
+        end = (
+            start +
+            chunk_duration
+        )
 
-    group_duration = (
-        end - start
-    ) / max(
-        1,
-        len(groups)
+        safe_text = escape_drawtext(
+            chunk.upper()
+        )
+
+        # Large readable captions.
+        #
+        # Width is controlled by wrapping the text ourselves.
+        #
+        # Position is deliberately centered in a safe zone.
+
+        caption_filters.append(
+            "drawtext="
+            "fontfile=/usr/share/fonts/truetype/dejavu/"
+            "DejaVuSans-Bold.ttf:"
+            f"text='{safe_text}':"
+            "fontsize=76:"
+            "fontcolor=white:"
+            "borderw=7:"
+            "bordercolor=black:"
+            "shadowx=3:"
+            "shadowy=3:"
+            "x=(w-text_w)/2:"
+            "y=h-470:"
+            f"enable='between(t,{start:.3f},{end:.3f})'"
+        )
+
+    current_time += scene_duration
+
+
+# =========================================================
+# APPLY CAPTIONS
+# =========================================================
+
+caption_filter = ",".join(
+    caption_filters
+)
+
+run([
+    "ffmpeg",
+    "-y",
+    "-loglevel",
+    "error",
+    "-i",
+    str(joined),
+    "-vf",
+    caption_filter,
+    "-an",
+    "-c:v",
+    "libx264",
+    "-preset",
+    "veryfast",
+    "-crf",
+    "22",
+    "-pix_fmt",
+    "yuv420p",
+    str(captioned),
+])
+
+
+# =========================================================
+# FINAL AUDIO + VIDEO
+# =========================================================
+
+run([
+    "ffmpeg",
+    "-y",
+    "-loglevel",
+    "error",
+    "-i",
+    str(captioned),
+    "-i",
+    str(AUDIO),
+    "-map",
+    "0:v:0",
+    "-map",
+    "1:a:0",
+    "-c:v",
+    "copy",
+    "-c:a",
+    "aac",
+    "-b:a",
+    "128k",
+    "-shortest",
+    "-movflags",
+    "+faststart",
+    str(OUTPUT),
+])
+
+
+# =========================================================
+# VERIFY OUTPUT
+# =========================================================
+
+if not OUTPUT.exists():
+    raise RuntimeError(
+        "Final video was not created."
     )
 
+if OUTPUT.stat().st_size < 100000:
+    raise RuntimeError(
+        "Final video is suspiciously small."
+    )
 
-    for index, group in enumerate(groups):
-
-        a = (
-            start
-            +
-            index
-            *
-            group_duration
-        )
-
-        b = (
-            start
-            +
-            (index + 1)
-            *
-            group_duration
-        )
-
-
-        # ----------------------------------------------------
-        # IMPORTANT:
-        # ASS can interpret long words strangely if they
-        # aren't escaped properly.
-        # ----------------------------------------------------
-
-        group = (
-            group
-            .replace(
-                "\\",
-                ""
-            )
-            .replace(
-                "{",
-                ""
-            )
-            .replace(
-                "}",
-                ""
-            )
-        )
-
-
-        events.append(
-            "Dialogue: 0,"
-            + timestamp(a)
-            + ","
-            + timestamp(b)
-            + ",Main,,0,0,0,,"
-            + group
-        )
-
-
-captions = (
-    WORK /
-    "captions.ass"
+final_duration = ffprobe_duration(
+    OUTPUT
 )
-
-
-captions.write_text(
-    ass_header
-    +
-    "\n".join(events),
-    encoding="utf-8"
-)
-
-
-# ============================================================
-# OUTPUT
-# ============================================================
 
 print()
 print("=" * 60)
-print("VIDEO SCENES CREATED")
+print("FINAL SHORT CREATED")
 print("=" * 60)
-
-print(
-    "Duration:",
-    round(duration, 2),
-    "seconds"
-)
-
-print(
-    "Scenes:",
-    len(scenes)
-)
-
-print(
-    "Images:",
-    len(images)
-)
-
+print("File:", OUTPUT)
+print("Size:", OUTPUT.stat().st_size)
+print("Duration:", final_duration)
+print("Resolution: 1080x1920")
 print("=" * 60)
