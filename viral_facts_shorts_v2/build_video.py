@@ -3,36 +3,45 @@ import subprocess
 import wave
 import math
 import re
-import json
 
 ROOT = pathlib.Path(__file__).parent
-W = ROOT / "work"
+WORK = ROOT / "work"
 
-AUDIO = W / "audio.wav"
-SCRIPT = W / "script.txt"
-IMAGES = W / "images"
+AUDIO = WORK / "audio.wav"
+SCRIPT = WORK / "script.txt"
+IMAGES = WORK / "images"
 
-W.mkdir(exist_ok=True)
+W = 1080
+H = 1920
+FPS = 30
 
-# ---------------------------------------------------------
+
+# ============================================================
 # AUDIO DURATION
-# ---------------------------------------------------------
+# ============================================================
 
 if not AUDIO.exists():
+
     raise RuntimeError(
-        "work/audio.wav was not found."
+        "work/audio.wav does not exist."
     )
 
-with wave.open(str(AUDIO), "rb") as f:
+
+with wave.open(
+    str(AUDIO),
+    "rb"
+) as f:
+
     duration = (
         f.getnframes()
         /
         f.getframerate()
     )
 
-# ---------------------------------------------------------
+
+# ============================================================
 # SCRIPT
-# ---------------------------------------------------------
+# ============================================================
 
 parts = [
     x.strip()
@@ -42,27 +51,47 @@ parts = [
     if x.strip()
 ]
 
+
 if not parts:
+
     raise RuntimeError(
-        "work/script.txt is empty."
+        "script.txt is empty."
     )
 
-# ---------------------------------------------------------
-# TIMELINE
-# ---------------------------------------------------------
 
-weights = [
-    max(1, len(x.split()))
-    for x in parts
-]
+# ============================================================
+# WEIGHT TIMELINE
+# ============================================================
 
-total = sum(weights)
+weights = []
+
+for text in parts:
+
+    words = len(
+        text.split()
+    )
+
+    weights.append(
+        max(
+            1,
+            words
+        )
+    )
+
+
+total = sum(
+    weights
+)
+
 
 timeline = []
 
 current = 0.0
 
-for text, weight in zip(parts, weights):
+for text, weight in zip(
+    parts,
+    weights
+):
 
     scene_duration = (
         duration
@@ -82,42 +111,218 @@ for text, weight in zip(parts, weights):
 
     current += scene_duration
 
-# ---------------------------------------------------------
-# VISUALS
-# ---------------------------------------------------------
+
+# ============================================================
+# IMAGES
+# ============================================================
 
 images = sorted(
-    IMAGES.glob("*.jpg")
+    IMAGES.glob(
+        "*.jpg"
+    )
 )
 
-if not images:
 
-    images = sorted(
-        IMAGES.glob("*.jpeg")
-    )
-
-if not images:
-
-    images = sorted(
-        IMAGES.glob("*.png")
-    )
-
-if not images:
+if len(images) < 4:
 
     raise RuntimeError(
-        "No visual images were found."
+        "Not enough visuals."
     )
 
-print()
-print(
-    "Found",
-    len(images),
-    "visuals."
+
+# ============================================================
+# MAKE SCENES
+# ============================================================
+
+scenes = []
+
+
+for i, (
+    start,
+    end,
+    text
+) in enumerate(timeline):
+
+    scene_duration = max(
+        0.7,
+        end - start
+    )
+
+    image = images[
+        i % len(images)
+    ]
+
+    output = (
+        WORK
+        /
+        f"scene_{i:02d}.mp4"
+    )
+
+
+    # ========================================================
+    # SAFE VERTICAL IMAGE FIT
+    # ========================================================
+    #
+    # The image is enlarged until it completely covers
+    # 1080x1920, then cropped safely.
+    #
+    # This prevents the previous:
+    # "Invalid too big or non positive crop size" error.
+    #
+
+    if i % 3 == 0:
+
+        motion = (
+            "zoompan="
+            "z='min(zoom+0.0018,1.14)':"
+            "x='iw/2-(iw/zoom/2)':"
+            "y='ih/2-(ih/zoom/2)':"
+            "d=1:"
+            "s=1080x1920:"
+            "fps=30"
+        )
+
+    elif i % 3 == 1:
+
+        motion = (
+            "zoompan="
+            "z='min(zoom+0.0015,1.12)':"
+            "x='iw/2-(iw/zoom/2)+"
+            "35*sin(on/18)':"
+            "y='ih/2-(ih/zoom/2)':"
+            "d=1:"
+            "s=1080x1920:"
+            "fps=30"
+        )
+
+    else:
+
+        motion = (
+            "zoompan="
+            "z='min(zoom+0.0020,1.16)':"
+            "x='iw/2-(iw/zoom/2)':"
+            "y='ih/2-(ih/zoom/2)+"
+            "25*sin(on/16)':"
+            "d=1:"
+            "s=1080x1920:"
+            "fps=30"
+        )
+
+
+    vf = (
+        "scale="
+        "1080:1920:"
+        "force_original_aspect_ratio=increase,"
+        "crop=1080:1920,"
+        + motion
+        + ","
+        "eq=saturation=1.08:"
+        "contrast=1.04,"
+        "format=yuv420p"
+    )
+
+
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-loglevel",
+            "error",
+
+            "-loop",
+            "1",
+
+            "-i",
+            str(image),
+
+            "-vf",
+            vf,
+
+            "-t",
+            str(scene_duration),
+
+            "-an",
+
+            "-c:v",
+            "libx264",
+
+            "-preset",
+            "veryfast",
+
+            "-crf",
+            "23",
+
+            "-pix_fmt",
+            "yuv420p",
+
+            str(output),
+        ],
+        check=True
+    )
+
+
+    scenes.append(
+        output
+    )
+
+
+# ============================================================
+# CONCAT
+# ============================================================
+
+concat_file = (
+    WORK /
+    "concat.txt"
 )
 
-# ---------------------------------------------------------
-# TIMESTAMP
-# ---------------------------------------------------------
+
+concat_file.write_text(
+    "\n".join(
+        "file '"
+        +
+        str(scene.resolve())
+        +
+        "'"
+        for scene in scenes
+    ),
+    encoding="utf-8"
+)
+
+
+silent = (
+    WORK /
+    "silent.mp4"
+)
+
+
+subprocess.run(
+    [
+        "ffmpeg",
+        "-y",
+        "-loglevel",
+        "error",
+
+        "-f",
+        "concat",
+
+        "-safe",
+        "0",
+
+        "-i",
+        str(concat_file),
+
+        "-c",
+        "copy",
+
+        str(silent),
+    ],
+    check=True
+)
+
+
+# ============================================================
+# ASS CAPTIONS
+# ============================================================
 
 def timestamp(seconds):
 
@@ -132,8 +337,7 @@ def timestamp(seconds):
 
     secs = (
         seconds
-        %
-        60
+        % 60
     )
 
     return (
@@ -143,417 +347,157 @@ def timestamp(seconds):
     )
 
 
-# ---------------------------------------------------------
-# CREATE SCENES
-# ---------------------------------------------------------
+# ============================================================
+# CAPTION HEADER
+# ============================================================
 
-scenes = []
-
-for i, (start, end, text) in enumerate(
-    timeline
-):
-
-    image = images[
-        i % len(images)
-    ]
-
-    output = (
-        W /
-        f"scene_{i:02d}.mp4"
-    )
-
-    scene_duration = max(
-        0.8,
-        end - start
-    )
-
-    print()
-    print(
-        f"Scene {i + 1}/{len(timeline)}"
-    )
-
-    print(
-        "Visual:",
-        image.name
-    )
-
-    print(
-        "Text:",
-        text
-    )
-
-    # -----------------------------------------------------
-    # IMPORTANT:
-    #
-    # Scale the image proportionally so that it completely
-    # covers a 1080x1920 canvas.
-    #
-    # This works for BOTH landscape and portrait images.
-    # -----------------------------------------------------
-
-    if i % 3 == 0:
-
-        motion = (
-            "zoompan="
-            "z='min(zoom+0.0028,1.16)':"
-            "x='iw/2-(iw/zoom/2)':"
-            "y='ih/2-(ih/zoom/2)':"
-            "d=1:"
-            "s=1080x1920:"
-            "fps=30"
-        )
-
-    elif i % 3 == 1:
-
-        motion = (
-            "zoompan="
-            "z='min(zoom+0.0032,1.18)':"
-            "x='iw/2-(iw/zoom/2)+"
-            "45*sin(on/12)':"
-            "y='ih/2-(ih/zoom/2)':"
-            "d=1:"
-            "s=1080x1920:"
-            "fps=30"
-        )
-
-    else:
-
-        motion = (
-            "zoompan="
-            "z='min(zoom+0.0025,1.14)':"
-            "x='iw/2-(iw/zoom/2)':"
-            "y='ih/2-(ih/zoom/2)+"
-            "35*sin(on/10)':"
-            "d=1:"
-            "s=1080x1920:"
-            "fps=30"
-        )
-
-    # -----------------------------------------------------
-    # THE IMPORTANT FIX
-    #
-    # force_original_aspect_ratio=increase makes the image
-    # large enough to cover the entire 1080x1920 canvas.
-    #
-    # THEN crop it safely.
-    # -----------------------------------------------------
-
-    vf = (
-        "scale="
-        "1080:1920:"
-        "force_original_aspect_ratio=increase,"
-        "crop=1080:1920,"
-        "setsar=1,"
-        f"{motion},"
-        "eq="
-        "saturation=1.12:"
-        "contrast=1.06:"
-        "brightness=0.01,"
-        "format=yuv420p"
-    )
-
-    command = [
-        "ffmpeg",
-        "-y",
-        "-loglevel",
-        "error",
-
-        "-loop",
-        "1",
-
-        "-i",
-        str(image),
-
-        "-vf",
-        vf,
-
-        "-t",
-        str(scene_duration),
-
-        "-r",
-        "30",
-
-        "-c:v",
-        "libx264",
-
-        "-preset",
-        "veryfast",
-
-        "-crf",
-        "23",
-
-        "-pix_fmt",
-        "yuv420p",
-
-        str(output)
-    ]
-
-    subprocess.run(
-        command,
-        check=True
-    )
-
-    scenes.append(output)
-
-
-# ---------------------------------------------------------
-# CONCATENATE
-# ---------------------------------------------------------
-
-concat = W / "concat.txt"
-
-concat.write_text(
-    "\n".join(
-        f"file '{scene.resolve()}'"
-        for scene in scenes
-    ),
-    encoding="utf-8"
-)
-
-silent = W / "silent.mp4"
-
-subprocess.run(
-    [
-        "ffmpeg",
-        "-y",
-        "-loglevel",
-        "error",
-        "-f",
-        "concat",
-        "-safe",
-        "0",
-        "-i",
-        str(concat),
-        "-c",
-        "copy",
-        str(silent)
-    ],
-    check=True
-)
-
-
-# ---------------------------------------------------------
-# CAPTIONS
-# ---------------------------------------------------------
-
-ass = W / "captions.ass"
-
-header = """[Script Info]
+ass_header = """[Script Info]
 ScriptType: v4.00+
 PlayResX: 1080
 PlayResY: 1920
+ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding
-Style: Main,Arial,74,&H00FFFFFF,&H00FFFFFF,&H00000000,&HAA000000,1,0,1,7,3,5,70,70,300,1
+Style: Main,Arial,64,&H00FFFFFF,&H00FFFFFF,&H00000000,&HCC000000,1,0,1,5,2,5,100,100,400,1
 
 [Events]
 Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
 """
 
+
 events = []
+
+
+# ============================================================
+# WORD GROUP CAPTIONS
+# ============================================================
 
 for start, end, text in timeline:
 
     words = text.split()
 
-    # 3-word groups = faster visual rhythm
-    group_size = 3
-
-    groups = [
-        words[x:x + group_size]
-        for x in range(
-            0,
-            len(words),
-            group_size
-        )
-    ]
-
-    groups = [
-        group
-        for group in groups
-        if group
-    ]
-
-    if not groups:
+    if not words:
         continue
 
-    step = (
-        end - start
-    ) / len(groups)
 
-    for j, group in enumerate(
-        groups
+    # 3 words per caption.
+    group_size = 3
+
+    groups = []
+
+    for i in range(
+        0,
+        len(words),
+        group_size
     ):
+
+        group = words[
+            i:i + group_size
+        ]
+
+        groups.append(
+            " ".join(group)
+        )
+
+
+    group_duration = (
+        end - start
+    ) / max(
+        1,
+        len(groups)
+    )
+
+
+    for index, group in enumerate(groups):
 
         a = (
             start
             +
-            j * step
+            index
+            *
+            group_duration
         )
 
-        b = min(
-            end,
+        b = (
             start
             +
-            (j + 1) * step
+            (index + 1)
+            *
+            group_duration
         )
 
-        caption = " ".join(
+
+        # ----------------------------------------------------
+        # IMPORTANT:
+        # ASS can interpret long words strangely if they
+        # aren't escaped properly.
+        # ----------------------------------------------------
+
+        group = (
             group
-        )
-
-        # ASS escape
-        caption = (
-            caption
             .replace(
                 "\\",
-                "\\\\"
+                ""
             )
             .replace(
                 "{",
-                "\\{"
+                ""
             )
             .replace(
                 "}",
-                "\\}"
+                ""
             )
         )
 
+
         events.append(
             "Dialogue: 0,"
-            f"{timestamp(a)},"
-            f"{timestamp(b)},"
-            "Main,,0,0,0,,"
-            f"{caption}"
+            + timestamp(a)
+            + ","
+            + timestamp(b)
+            + ",Main,,0,0,0,,"
+            + group
         )
 
-ass.write_text(
-    header
+
+captions = (
+    WORK /
+    "captions.ass"
+)
+
+
+captions.write_text(
+    ass_header
     +
     "\n".join(events),
     encoding="utf-8"
 )
 
 
-# ---------------------------------------------------------
-# FINAL VIDEO
-# ---------------------------------------------------------
-
-final = (
-    W /
-    "viral-fact-short.mp4"
-)
-
-# ---------------------------------------------------------
-# SOUND EFFECT
-# ---------------------------------------------------------
-
-effects = (
-    W /
-    "effects.wav"
-)
-
-subprocess.run(
-    [
-        "ffmpeg",
-        "-y",
-        "-loglevel",
-        "error",
-
-        "-f",
-        "lavfi",
-
-        "-i",
-        (
-            "aevalsrc="
-            "0.035*sin("
-            "2*PI*(500+1200*t/0.16)"
-            ")*exp(-12*t)"
-            ":s=44100:d=0.16"
-        ),
-
-        "-c:a",
-        "pcm_s16le",
-
-        str(effects)
-    ],
-    check=True
-)
-
-# ---------------------------------------------------------
-# MIX
-# ---------------------------------------------------------
-
-filter_complex = (
-    f"[0:v]ass={ass}[v];"
-    "[2:a]volume=0.07[fx];"
-    "[fx]aloop=loop=30:size=7056[fxloop];"
-    "[1:a]volume=1[a];"
-    "[a][fxloop]"
-    "amix="
-    "inputs=2:"
-    "duration=first:"
-    "dropout_transition=2"
-    "[aout]"
-)
-
-subprocess.run(
-    [
-        "ffmpeg",
-        "-y",
-        "-loglevel",
-        "error",
-
-        "-i",
-        str(silent),
-
-        "-i",
-        str(AUDIO),
-
-        "-i",
-        str(effects),
-
-        "-filter_complex",
-        filter_complex,
-
-        "-map",
-        "[v]",
-
-        "-map",
-        "[aout]",
-
-        "-c:v",
-        "libx264",
-
-        "-preset",
-        "veryfast",
-
-        "-crf",
-        "23",
-
-        "-c:a",
-        "aac",
-
-        "-b:a",
-        "128k",
-
-        "-pix_fmt",
-        "yuv420p",
-
-        "-shortest",
-
-        "-movflags",
-        "+faststart",
-
-        str(final)
-    ],
-    check=True
-)
+# ============================================================
+# OUTPUT
+# ============================================================
 
 print()
 print("=" * 60)
-print("VIDEO CREATED SUCCESSFULLY")
+print("VIDEO SCENES CREATED")
 print("=" * 60)
-print(final)
+
+print(
+    "Duration:",
+    round(duration, 2),
+    "seconds"
+)
+
+print(
+    "Scenes:",
+    len(scenes)
+)
+
+print(
+    "Images:",
+    len(images)
+)
+
 print("=" * 60)
