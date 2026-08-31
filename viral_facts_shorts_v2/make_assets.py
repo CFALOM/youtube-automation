@@ -1,485 +1,217 @@
 import json
 import pathlib
 import requests
-import random
 import time
 import re
-from urllib.parse import quote
 
 ROOT = pathlib.Path(__file__).parent
 WORK = ROOT / "work"
-
 IMAGES = WORK / "images"
 
-IMAGES.mkdir(parents=True, exist_ok=True)
+WORK.mkdir(exist_ok=True)
+IMAGES.mkdir(exist_ok=True)
 
-UA = "ViralFactsShortsVisuals/Final/1.0"
-
-
-# ============================================================
-# CLEAN OLD VISUALS
-# ============================================================
-
-for file in IMAGES.glob("*"):
+# Remove old visuals
+for f in IMAGES.glob("*"):
     try:
-        file.unlink()
-    except Exception:
+        f.unlink()
+    except:
         pass
 
-
-# ============================================================
-# LOAD FACT
-# ============================================================
+UA = "Mozilla/5.0 (compatible; ViralFactsShorts/2.0)"
 
 selected = json.loads(
-    (WORK / "selected.json").read_text(
-        encoding="utf-8"
-    )
+    (WORK / "selected.json").read_text(encoding="utf-8")
 )
 
-topic = selected["topic"]
-title = selected["title"]
-terms = selected["visual_terms"]
+topic = selected.get("topic", "")
+title = selected.get("title", "")
 
+# =========================================================
+# BUILD ONE GOOD SEARCH QUERY
+# =========================================================
 
-print()
+query = title if title else topic
+
 print("=" * 60)
-print("VISUAL ENGINE")
+print("VISUAL SEARCH")
 print("=" * 60)
-
 print("Topic:", topic)
-print("Article:", title)
+print("Title:", title)
+print("Query:", query)
 
-print()
-print("Visual searches:")
-
-for term in terms:
-    print("-", term)
-
-
-# ============================================================
-# WIKIMEDIA API
-# ============================================================
+# =========================================================
+# WIKIMEDIA COMMONS SEARCH
+# ONE REQUEST ONLY
+# =========================================================
 
 API = "https://commons.wikimedia.org/w/api.php"
 
+params = {
+    "action": "query",
+    "generator": "search",
+    "gsrsearch": query,
+    "gsrnamespace": 6,
+    "gsrlimit": 12,
+    "prop": "imageinfo",
+    "iiprop": "url|mime",
+    "iiurlwidth": 1200,
+    "format": "json",
+}
 
-def commons_search(term):
+try:
 
-    params = {
-        "action": "query",
-        "generator": "search",
-        "gsrsearch": term,
-        "gsrnamespace": 6,
-        "gsrlimit": 8,
-        "prop": "imageinfo",
-        "iiprop": "url|mime",
-        "iiurlwidth": 1400,
-        "format": "json",
-    }
-
-    headers = {
-        "User-Agent": UA
-    }
-
-    for attempt in range(4):
-
-        try:
-
-            response = requests.get(
-                API,
-                params=params,
-                headers=headers,
-                timeout=30,
-            )
-
-            if response.status_code == 429:
-
-                wait = 15 * (attempt + 1)
-
-                print(
-                    "Wikimedia rate limit. Waiting",
-                    wait,
-                    "seconds..."
-                )
-
-                time.sleep(wait)
-
-                continue
-
-            response.raise_for_status()
-
-            data = response.json()
-
-            pages = data.get(
-                "query",
-                {}
-            ).get(
-                "pages",
-                {}
-            )
-
-            results = []
-
-            for page in pages.values():
-
-                info_list = page.get(
-                    "imageinfo",
-                    []
-                )
-
-                if not info_list:
-                    continue
-
-                info = info_list[0]
-
-                url = (
-                    info.get("thumburl")
-                    or info.get("url")
-                )
-
-                mime = info.get(
-                    "mime",
-                    ""
-                )
-
-                if not url:
-                    continue
-
-                if not mime.startswith("image/"):
-                    continue
-
-                # Ignore SVG here because FFmpeg handling
-                # is less reliable than JPEG/PNG.
-                if mime == "image/svg+xml":
-                    continue
-
-                results.append(
-                    (
-                        page.get(
-                            "title",
-                            ""
-                        ),
-                        url
-                    )
-                )
-
-            return results
-
-        except Exception as error:
-
-            print(
-                "Search error:",
-                error
-            )
-
-            time.sleep(
-                5 * (attempt + 1)
-            )
-
-    return []
-
-
-# ============================================================
-# DOWNLOAD
-# ============================================================
-
-def download(url, path):
-
-    headers = {
-        "User-Agent": UA
-    }
-
-    for attempt in range(4):
-
-        try:
-
-            response = requests.get(
-                url,
-                headers=headers,
-                timeout=45,
-            )
-
-            if response.status_code == 429:
-
-                wait = 15 * (attempt + 1)
-
-                print(
-                    "Download rate limited. Waiting",
-                    wait,
-                    "seconds..."
-                )
-
-                time.sleep(wait)
-
-                continue
-
-            response.raise_for_status()
-
-            data = response.content
-
-            if len(data) < 15000:
-                raise RuntimeError(
-                    "Image is suspiciously small."
-                )
-
-            path.write_bytes(data)
-
-            return True
-
-        except Exception as error:
-
-            print(
-                "Download failed:",
-                error
-            )
-
-            time.sleep(
-                5 * (attempt + 1)
-            )
-
-    return False
-
-
-# ============================================================
-# IMAGE RELEVANCE
-# ============================================================
-
-def relevance(filename, search_term):
-
-    name = filename.lower()
-    query = search_term.lower()
-
-    score = 0
-
-    words = re.findall(
-        r"[a-z0-9]+",
-        query
+    response = requests.get(
+        API,
+        params=params,
+        headers={
+            "User-Agent": UA
+        },
+        timeout=15
     )
 
-    for word in words:
+    response.raise_for_status()
 
-        if len(word) >= 4 and word in name:
-            score += 3
+    data = response.json()
 
-    # Prefer actual photographs/images over diagrams
-    # when possible.
-    if "diagram" in name:
-        score -= 2
+except Exception as error:
 
-    if "map" in name:
-        score -= 1
+    print("Wikimedia search failed:", error)
 
-    if "logo" in name:
-        score -= 4
+    data = {}
 
-    if "icon" in name:
-        score -= 4
-
-    return score
-
-
-# ============================================================
-# SEARCH STRATEGY
-# ============================================================
-
-# Exact article first.
-searches = [
-    title,
-    f"{title} photo",
-    f"{title} image",
-    topic,
-    f"{topic} photo",
-    f"{topic} history",
-]
-
-# Remove duplicates.
-searches = list(
-    dict.fromkeys(searches)
+pages = (
+    data
+    .get("query", {})
+    .get("pages", {})
 )
 
+print("Search results:", len(pages))
 
-found = []
+# =========================================================
+# COLLECT IMAGE URLS
+# =========================================================
 
-seen_urls = set()
+urls = []
 
+for page in pages.values():
 
-# ============================================================
-# SEARCH
-# ============================================================
-
-for index, term in enumerate(searches):
-
-    # We want several DIFFERENT visuals.
-    if len(found) >= 8:
-        break
-
-    print()
-    print(
-        f"Searching {index + 1}/{len(searches)}:",
-        term
+    info_list = page.get(
+        "imageinfo",
+        []
     )
 
-    results = commons_search(term)
+    if not info_list:
+        continue
 
-    random.shuffle(results)
+    info = info_list[0]
 
-    for filename, url in results:
+    url = (
+        info.get("thumburl")
+        or info.get("url")
+    )
 
-        if url in seen_urls:
-            continue
+    if not url:
+        continue
 
-        seen_urls.add(url)
+    mime = info.get(
+        "mime",
+        ""
+    )
 
-        score = relevance(
-            filename,
-            term
-        )
+    if not mime.startswith("image/"):
+        continue
 
-        found.append(
-            (
-                score,
-                filename,
-                url,
-            )
-        )
+    # Avoid obvious SVGs and weird formats
+    if re.search(
+        r"\.(svg|gif|tiff?)($|\?)",
+        url,
+        re.I
+    ):
+        continue
 
-        if len(found) >= 8:
-            break
+    if url not in urls:
+        urls.append(url)
 
+# =========================================================
+# DOWNLOAD MAX 8
+# =========================================================
 
-# ============================================================
-# SORT
-# ============================================================
-
-found.sort(
-    key=lambda x: x[0],
-    reverse=True
-)
-
-
-# ============================================================
-# DOWNLOAD
-# ============================================================
+print("Usable image URLs:", len(urls))
 
 downloaded = 0
 
-for score, filename, url in found:
+session = requests.Session()
 
-    if downloaded >= 7:
+session.headers.update({
+    "User-Agent": UA
+})
+
+for index, url in enumerate(urls):
+
+    if downloaded >= 8:
         break
 
     output = (
-        IMAGES
-        /
+        IMAGES /
         f"image_{downloaded:02d}.jpg"
     )
 
-    print()
     print(
-        "Downloading:",
-        filename
+        f"Downloading {downloaded + 1}:",
+        url[:120]
     )
 
-    if download(
-        url,
-        output
-    ):
+    try:
+
+        response = session.get(
+            url,
+            timeout=12
+        )
+
+        response.raise_for_status()
+
+        content = response.content
+
+        if len(content) < 10000:
+            print("Skipped: file too small")
+            continue
+
+        output.write_bytes(content)
 
         downloaded += 1
 
         print(
-            "Saved:",
+            "Downloaded:",
             output.name
         )
 
+        # Small delay to be polite to Wikimedia
+        time.sleep(1)
 
-# ============================================================
-# IMPORTANT:
-# IF WE HAVE FEWER THAN 4, TRY AGAIN WITH SLOWER SEARCH
-# ============================================================
-
-if downloaded < 4:
-
-    print()
-    print(
-        "Only",
-        downloaded,
-        "visuals found."
-    )
-
-    print(
-        "Trying additional searches..."
-    )
-
-    extra_terms = [
-        f"{topic} Wikimedia",
-        f"{title} Wikimedia",
-        f"{title} historical",
-        f"{topic} historical photograph",
-    ]
-
-    for term in extra_terms:
-
-        if downloaded >= 6:
-            break
+    except Exception as error:
 
         print(
-            "Extra search:",
-            term
+            "Download failed:",
+            error
         )
 
-        results = commons_search(term)
-
-        random.shuffle(results)
-
-        for filename, url in results:
-
-            if url in seen_urls:
-                continue
-
-            seen_urls.add(url)
-
-            output = (
-                IMAGES
-                /
-                f"image_{downloaded:02d}.jpg"
-            )
-
-            if download(
-                url,
-                output
-            ):
-
-                downloaded += 1
-
-                print(
-                    "Saved:",
-                    output.name
-                )
-
-                if downloaded >= 6:
-                    break
-
-
-# ============================================================
+# =========================================================
 # RESULT
-# ============================================================
+# =========================================================
 
 print()
 print("=" * 60)
 print("VISUAL SEARCH COMPLETE")
 print("=" * 60)
-
-print("Topic:", topic)
-print("Article:", title)
 print("Images:", downloaded)
 print("=" * 60)
 
+# We only require ONE real image here.
+# build_video.py can reuse/animate the available visuals.
 
-if downloaded < 4:
+if downloaded == 0:
 
     raise RuntimeError(
-        "Could not obtain enough relevant visuals. "
-        "The workflow stopped instead of creating a bad Short."
+        "No real visuals could be downloaded."
     )
