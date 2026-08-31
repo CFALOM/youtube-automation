@@ -1,247 +1,38 @@
-name: Viral Facts Shorts
+```yaml
+name: AI Long Video Generator
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "0 12 * * *"
-
-permissions:
-  contents: read
 
 jobs:
-  create-short:
+  generate-video:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-
-    defaults:
-      run:
-        working-directory: viral_facts_shorts_v2
 
     steps:
-
-      # =====================================================
-      # CHECKOUT
-      # =====================================================
-
-      - name: Checkout repository
+      - name: Download project
         uses: actions/checkout@v4
 
-      # =====================================================
-      # PYTHON
-      # =====================================================
+      - name: Make render script executable
+        run: chmod +x viral_facts_long_v1/render.sh
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      # =====================================================
-      # FFMPEG
-      # =====================================================
-
-      - name: Install FFmpeg
-        working-directory: .
+      - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg
+          sudo apt-get install -y ffmpeg python3 python3-pip
 
-          echo "FFmpeg version:"
-          ffmpeg -version | head -n 1
-
-      # =====================================================
-      # PYTHON DEPENDENCIES
-      # =====================================================
-
-      - name: Install Python dependencies
+      - name: Install Python packages
         run: |
-          python -m pip install --upgrade pip
-          pip install requests
+          python3 -m pip install --upgrade pip
+          pip3 install requests
 
-      # =====================================================
-      # CLEAN OLD WORK
-      # =====================================================
+      - name: Generate video
+        working-directory: viral_facts_long_v1
+        run: ./render.sh all
 
-      - name: Clean previous files
-        run: |
-          rm -rf work/images
-          rm -rf work/videos
-          rm -rf work/scenes
-
-          mkdir -p work/images
-          mkdir -p work/videos
-          mkdir -p work/scenes
-
-          rm -f work/*.mp4
-          rm -f work/*.wav
-          rm -f work/*.json
-          rm -f work/*.txt
-
-      # =====================================================
-      # GENERATE FACT
-      # =====================================================
-
-      - name: Generate fact
-        run: |
-          echo "========================================"
-          echo "GENERATING VIRAL FACT"
-          echo "========================================"
-
-          python generator.py
-
-          echo
-          echo "========================================"
-          echo "GENERATED SCRIPT"
-          echo "========================================"
-
-          cat work/script.txt
-
-          echo
-          echo "========================================"
-          echo "SELECTED DATA"
-          echo "========================================"
-
-          cat work/selected.json
-
-      # =====================================================
-      # DOWNLOAD REAL VISUALS
-      # =====================================================
-
-      - name: Find real visuals
-        run: |
-          echo "========================================"
-          echo "FINDING REAL VISUALS"
-          echo "========================================"
-
-          python make_assets.py
-
-          echo
-          echo "========================================"
-          echo "DOWNLOADED VISUALS"
-          echo "========================================"
-
-          ls -lah work/images/
-
-          echo
-          echo "Image count:"
-          find work/images -type f | wc -l
-
-      # =====================================================
-      # CHECK VISUALS
-      # =====================================================
-
-      - name: Verify visuals
-        run: |
-          COUNT=$(find work/images -type f | wc -l)
-
-          echo "Usable visuals: $COUNT"
-
-          if [ "$COUNT" -lt 4 ]; then
-            echo "ERROR: Not enough visuals."
-            exit 1
-          fi
-
-      # =====================================================
-      # GENERATE NARRATION
-      # =====================================================
-      #
-      # IMPORTANT:
-      # Keep your existing TTS command here if you already
-      # have one configured.
-      #
-      # This example expects your repository to contain
-      # generate_audio.py.
-      #
-      # If your existing audio-generation script has a
-      # different filename, change ONLY this step.
-      #
-
-      - name: Generate narration
-        run: |
-          echo "========================================"
-          echo "NARRATION"
-          echo "========================================"
-
-          if [ -f generate_audio.py ]; then
-            python generate_audio.py
-          elif [ -f tts.py ]; then
-            python tts.py
-          elif [ -f make_audio.py ]; then
-            python make_audio.py
-          else
-            echo "No audio generator script found."
-            echo "Expected generate_audio.py, tts.py, or make_audio.py"
-            exit 1
-          fi
-
-          if [ ! -s work/audio.wav ]; then
-            echo "ERROR: work/audio.wav was not created."
-            exit 1
-          fi
-
-          echo "Audio successfully generated."
-
-          ffprobe \
-            -v error \
-            -show_entries format=duration \
-            -of default=noprint_wrappers=1:nokey=1 \
-            work/audio.wav
-
-      # =====================================================
-      # BUILD FINAL VIDEO
-      # =====================================================
-
-      - name: Build final Short
-        run: |
-          echo "========================================"
-          echo "RENDERING FINAL SHORT"
-          echo "========================================"
-
-          python build_video.py
-
-          echo
-          echo "========================================"
-          echo "VERIFYING FINAL SHORT"
-          echo "========================================"
-
-          if [ ! -s work/viral-fact-short.mp4 ]; then
-            echo "ERROR: Final video was not created."
-            exit 1
-          fi
-
-          ffprobe \
-            -v error \
-            -show_entries format=duration \
-            -show_entries stream=width,height \
-            -of default=noprint_wrappers=1 \
-            work/viral-fact-short.mp4
-
-          echo
-          echo "FINAL VIDEO:"
-          ls -lh work/viral-fact-short.mp4
-
-      # =====================================================
-      # UPLOAD VIDEO
-      # =====================================================
-
-      - name: Upload finished Short
+      - name: Upload generated video
         uses: actions/upload-artifact@v4
         with:
-          name: viral-fact-short
-          path: viral_facts_shorts_v2/work/viral-fact-short.mp4
+          name: generated-long-video
+          path: viral_facts_long_v1/work/final.mp4
           if-no-files-found: error
-          retention-days: 7
-
-      # =====================================================
-      # UPLOAD DEBUG FILES
-      # =====================================================
-
-      - name: Upload generation data
-        uses: actions/upload-artifact@v4
-        with:
-          name: viral-fact-debug
-          path: |
-            viral_facts_shorts_v2/work/selected.json
-            viral_facts_shorts_v2/work/script.txt
-            viral_facts_shorts_v2/work/visuals.json
-          if-no-files-found: warn
-          retention-days: 7
+```
