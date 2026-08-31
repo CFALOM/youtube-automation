@@ -1,106 +1,119 @@
-```bash
+
 #!/usr/bin/env bash
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-OLD="$ROOT/viral_facts_long_v1"
-WORK="$OLD/work"
+PROJECT="$ROOT/viral_facts_long_v1"
+WORK="$PROJECT/work"
+
+GENERATOR="$PROJECT/generator.py"
+ASSETS="$PROJECT/make_assets.py"
+VIDEO="$ROOT/build_video.py"
 
 mkdir -p "$WORK/images" "$WORK/scenes"
 
-say() {
-  printf '\n[%s] %s\n' "$(date '+%H:%M:%S')" "$1"
+log() {
+    echo "[$(date '+%H:%M:%S')] $1"
 }
 
-say "LONG-FORM VIDEO FACTORY — Attempt 1"
-
-STEP="${1:-all}"
-
-case "$STEP" in
-
-  topic)
-    say "1/4 TOPIC + SCRIPT"
-    python3 "$OLD/generator.py"
-    ;;
-
-  assets)
-    say "2/4 VISUAL ASSETS"
-    python3 "$OLD/make_assets.py"
-    ;;
-
-  video)
-    say "3/4 EDIT + RENDER"
-    python3 "$ROOT/build_video.py"
-    ;;
-
-  all)
-    say "1/4 TOPIC + SCRIPT"
-    python3 "$OLD/generator.py"
-
-    say "2/4 VISUAL ASSETS"
-    python3 "$OLD/make_assets.py"
-
-    say "3/4 NARRATION"
-
-    if ! command -v piper >/dev/null 2>&1; then
-      echo "Installing Piper TTS..."
-      python3 -m pip install --disable-pip-version-check --no-input piper-tts
-    fi
-
-    MODEL_NAME="${PIPER_MODEL_NAME:-en_US-lessac-medium}"
-
-    echo "Using local Piper voice: $MODEL_NAME"
-
-    if ! piper \
-      --model "$MODEL_NAME" \
-      --data-dir "$WORK/piper-data" \
-      --output_file "$WORK/narration.wav" \
-      < "$WORK/script.txt"; then
-
-      echo "Piper failed. Using espeak-ng fallback..."
-
-      if ! command -v espeak-ng >/dev/null 2>&1; then
-        sudo apt-get update -qq
-        sudo apt-get install -y espeak-ng
-      fi
-
-      espeak-ng \
-        -s 155 \
-        -v en-us \
-        -f "$WORK/script.txt" \
-        -w "$WORK/narration.wav"
-    fi
-
-    if [ ! -s "$WORK/narration.wav" ]; then
-      echo "ERROR: narration.wav was not created."
-      exit 1
-    fi
-
-    say "Narration ready"
-
-    say "3/4 EDIT + RENDER"
-    python3 "$ROOT/build_video.py"
-
-    if [ ! -f "$WORK/final.mp4" ]; then
-      echo "ERROR: $WORK/final.mp4 was not created."
-      echo "Available MP4 files:"
-      find "$ROOT" -type f -name "*.mp4" -print || true
-      exit 1
-    fi
-
-    say "4/4 COMPLETE"
-
+fail() {
     echo
-    echo "========================================"
-    echo "VIDEO COMPLETE"
-    echo "Output: $WORK/final.mp4"
-    echo "========================================"
-    ;;
+    echo "ERROR: $1"
+    exit 1
+}
 
-  *)
-    echo "Usage: ./render.sh [topic|assets|video|all]"
-    exit 2
-    ;;
+MODE="${1:-all}"
+
+echo "========================================"
+echo "LONG-FORM VIDEO FACTORY — Attempt 1"
+echo "========================================"
+
+case "$MODE" in
+
+    topic)
+        log "1/4 TOPIC + SCRIPT"
+        python3 "$GENERATOR"
+        ;;
+
+    assets)
+        log "2/4 VISUAL ASSETS"
+        python3 "$ASSETS"
+        ;;
+
+    video)
+        log "4/4 EDIT + RENDER"
+
+        [ -f "$WORK/narration.wav" ] || fail "narration.wav not found."
+
+        python3 "$VIDEO"
+
+        [ -f "$WORK/final.mp4" ] || fail "final.mp4 was not created."
+
+        log "COMPLETE"
+        ;;
+
+    all)
+
+        log "1/4 TOPIC + SCRIPT"
+        python3 "$GENERATOR"
+
+        log "2/4 VISUAL ASSETS"
+        python3 "$ASSETS"
+
+        log "3/4 NARRATION"
+
+        python3 -m pip install \
+            --disable-pip-version-check \
+            --no-input \
+            -q \
+            piper-tts
+
+        PIPER_DATA="$WORK/piper-data"
+        PIPER_VOICE="${PIPER_MODEL_NAME:-en_US-lessac-medium}"
+
+        mkdir -p "$PIPER_DATA"
+
+        echo "Checking Piper voice: $PIPER_VOICE"
+
+        python3 -m piper.download_voices \
+            --data-dir "$PIPER_DATA" \
+            "$PIPER_VOICE"
+
+        echo "Generating narration..."
+
+        python3 -m piper \
+            --model "$PIPER_VOICE" \
+            --data-dir "$PIPER_DATA" \
+            --input-file "$WORK/script.txt" \
+            --output-file "$WORK/narration.wav"
+
+        [ -s "$WORK/narration.wav" ] || fail "Narration was not created."
+
+        log "Narration ready"
+
+        log "4/4 EDIT + RENDER"
+
+        python3 "$VIDEO"
+
+        [ -f "$WORK/final.mp4" ] || fail "final.mp4 was not created."
+
+        echo
+        echo "========================================"
+        echo "VIDEO COMPLETE"
+        echo "========================================"
+        echo "File: $WORK/final.mp4"
+        echo "========================================"
+
+        ;;
+
+    *)
+        echo "Usage:"
+        echo "  ./render.sh all"
+        echo "  ./render.sh topic"
+        echo "  ./render.sh assets"
+        echo "  ./render.sh video"
+        exit 2
+        ;;
 
 esac
-```
+
