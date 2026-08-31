@@ -1,220 +1,130 @@
-name: Create Viral Facts Short
+name: Generate Viral Fact Short
 
 on:
   workflow_dispatch:
 
-permissions:
-  contents: read
-
 jobs:
-  build:
+  generate:
     runs-on: ubuntu-latest
+    timeout-minutes: 12
 
     defaults:
       run:
         working-directory: viral_facts_shorts_v2
 
     steps:
-
-      # =====================================================
-      # 1. DOWNLOAD REPOSITORY
-      # =====================================================
-
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
-      # =====================================================
-      # 2. INSTALL SYSTEM TOOLS
-      # =====================================================
-
-      - name: Install tools
+      - name: Install dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg librsvg2-bin
-
           python -m pip install --upgrade pip
-          python -m pip install requests piper-tts
+          pip install requests
 
-
-      # =====================================================
-      # 3. SHOW FILES
-      # =====================================================
-
-      - name: Check project files
+      - name: Check files
         run: |
-          echo "=== PROJECT ==="
-          pwd
-
+          echo "Checking project..."
+          ls -la
           echo ""
-          echo "=== FILES ==="
-          find . -maxdepth 3 -type f | sort
+          echo "Python files:"
+          find . -maxdepth 2 -name "*.py" -print
+          echo ""
+          test -f generator.py
+          test -f make_assets.py
+          test -f build_video.py
+          test -f render.sh
+          echo "All required files exist."
 
-
-      # =====================================================
-      # 4. GENERATE A RANDOM FACT
-      # =====================================================
-
-      - name: Generate fact
+      - name: Generate fact and script
         run: |
-          echo "Generating random fact..."
+          rm -rf work
+          mkdir -p work
           python generator.py
 
-          echo ""
-          echo "=== SELECTED FACT ==="
+      - name: Show generated fact
+        run: |
+          echo "========================================"
+          echo "GENERATED FACT"
+          echo "========================================"
           cat work/selected.json
-
           echo ""
-          echo "=== SCRIPT ==="
+          echo "========================================"
+          echo "SCRIPT"
+          echo "========================================"
           cat work/script.txt
 
-
-      # =====================================================
-      # 5. FIND REAL VISUALS
-      # =====================================================
-
-      - name: Create visuals
+      - name: Download visuals
         run: |
-          echo "Searching for relevant Wikimedia visuals..."
           python make_assets.py
-
-          echo ""
-          echo "=== DOWNLOADED VISUALS ==="
-          find work/images -type f -printf '%f %s bytes\n' | sort
-
-
-      # =====================================================
-      # 6. CHECK VISUALS
-      # =====================================================
 
       - name: Check visuals
         run: |
-          COUNT=$(find work/images -type f -name '*.jpg' | wc -l)
+          echo "========================================"
+          echo "VISUALS"
+          echo "========================================"
 
-          echo "Found $COUNT JPG visuals."
-
-          if [ "$COUNT" -lt 4 ]; then
-            echo "ERROR: Not enough visuals."
+          if [ ! -d work/images ]; then
+            echo "ERROR: work/images does not exist"
             exit 1
           fi
 
+          COUNT=$(find work/images -type f | wc -l)
 
-      # =====================================================
-      # 7. DOWNLOAD PIPER VOICE
-      # =====================================================
+          echo "Images found: $COUNT"
 
-      - name: Download Piper voice
+          if [ "$COUNT" -lt 1 ]; then
+            echo "ERROR: No visuals downloaded."
+            exit 1
+          fi
+
+          find work/images -maxdepth 1 -type f -print
+
+      - name: Generate voice
         run: |
-          mkdir -p voices
+          if [ ! -f work/audio.wav ]; then
+            echo "Generating narration..."
+            bash render.sh
+          else
+            echo "audio.wav already exists."
+          fi
 
-          python -m piper.download_voices \
-            en_US-lessac-medium \
-            --download-dir voices
-
-          echo ""
-          echo "=== VOICE FILES ==="
-          find voices -type f -printf '%p %s bytes\n'
-
-
-      # =====================================================
-      # 8. GENERATE NARRATION
-      # =====================================================
-
-      - name: Generate narration
+      - name: Check audio
         run: |
-          echo "Generating narration..."
+          if [ ! -s work/audio.wav ]; then
+            echo "ERROR: audio.wav is missing or empty."
+            exit 1
+          fi
 
-          mkdir -p work
-
-          piper \
-            --model voices/en_US-lessac-medium.onnx \
-            --output_file work/audio.wav \
-            < work/script.txt
-
-          echo ""
-          echo "=== AUDIO ==="
           ls -lh work/audio.wav
 
-
-      # =====================================================
-      # 9. BUILD VISUAL SCENES
-      # =====================================================
-
-      - name: Build video scenes
+      - name: Build video
         run: |
-          echo "Building animated scenes..."
-
           python build_video.py
 
-          echo ""
-          echo "=== GENERATED VIDEO FILES ==="
-          find work -maxdepth 1 -type f -printf '%f %s bytes\n' | sort
-
-
-      # =====================================================
-      # 10. RENDER FINAL SHORT
-      # =====================================================
-
-      - name: Render final video
+      - name: Check final video
         run: |
-          echo "Rendering final Short..."
-
-          chmod +x render.sh
-
-          ./render.sh
-
-          echo ""
-          echo "=== FINAL OUTPUT ==="
-
-          if [ -f work/viral-fact-short.mp4 ]; then
-            ls -lh work/viral-fact-short.mp4
-          else
-            echo "ERROR: Final video was not created."
-            exit 1
-          fi
-
-
-      # =====================================================
-      # 11. VERIFY VIDEO
-      # =====================================================
-
-      - name: Verify final video
-        run: |
-          echo "Checking final video..."
-
-          if [ ! -f work/viral-fact-short.mp4 ]; then
-            echo "ERROR: viral-fact-short.mp4 does not exist."
-            exit 1
-          fi
+          echo "========================================"
+          echo "FINAL VIDEO"
+          echo "========================================"
 
           if [ ! -s work/viral-fact-short.mp4 ]; then
-            echo "ERROR: viral-fact-short.mp4 is empty."
+            echo "ERROR: Final MP4 was not created."
+            echo ""
+            echo "Contents of work:"
+            find work -maxdepth 3 -type f -print
             exit 1
           fi
 
-          echo ""
-          echo "=== FILE SIZE ==="
           ls -lh work/viral-fact-short.mp4
 
-          echo ""
-          echo "=== VIDEO INFORMATION ==="
+          echo "Video successfully created."
 
-          ffprobe \
-            -v error \
-            -show_entries format=duration,size \
-            -show_entries stream=codec_name,width,height \
-            -of default=noprint_wrappers=1 \
-            work/viral-fact-short.mp4
-
-          echo ""
-          echo "VIDEO SUCCESSFULLY CREATED."
-
-
-      # =====================================================
-      # 12. UPLOAD VIDEO
-      # =====================================================
-
-      - name: Save Short
+      - name: Upload Short
         uses: actions/upload-artifact@v4
         with:
           name: viral-fact-short
