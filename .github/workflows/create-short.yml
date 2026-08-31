@@ -1,3 +1,4 @@
+```yaml
 name: AI Long Video Generator
 
 on:
@@ -8,29 +9,47 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Download project
+      - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Make render script executable
-        run: chmod +x viral_facts_long_v1/render.sh
 
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg python3 python3-pip
+          sudo apt-get install -y ffmpeg python3 python3-pip espeak-ng
 
-      - name: Install Python packages
+      - name: Install Python dependencies
         run: |
           python3 -m pip install --upgrade pip
-          pip3 install requests
+          pip3 install requests piper-tts
 
-      - name: Generate video
-        working-directory: viral_facts_long_v1
+      - name: Make render script executable
+        run: chmod +x ./render.sh
+
+      - name: Run AI video factory
         run: ./render.sh all
 
-      - name: Upload generated video
+      - name: Check generated video
+        run: |
+          echo "Checking output..."
+          ls -lh ./work/ || true
+
+          if [ ! -f "./work/final.mp4" ]; then
+            echo "ERROR: ./work/final.mp4 was not created."
+            echo "Available MP4 files:"
+            find . -type f -name "*.mp4" -print || true
+            exit 1
+          fi
+
+          echo "SUCCESS: ./work/final.mp4 exists."
+          ffprobe -v error \
+            -show_entries format=duration,size \
+            -of default=noprint_wrappers=1 \
+            ./work/final.mp4
+
+      - name: Upload final video
         uses: actions/upload-artifact@v4
         with:
           name: generated-long-video
-          path: viral_facts_long_v1/work/final.mp4
+          path: ./work/final.mp4
           if-no-files-found: error
+```
