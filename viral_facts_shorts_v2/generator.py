@@ -1,5 +1,4 @@
 import json
-import os
 import random
 import re
 import html
@@ -11,13 +10,15 @@ ROOT = pathlib.Path(__file__).parent
 WORK = ROOT / "work"
 WORK.mkdir(exist_ok=True)
 
-UA = "ViralFactsShorts/2.0"
+UA = "ViralFactsShorts/FINAL-2.0 (educational-short-generator)"
+
 
 # =========================================================
-# HUGE TOPIC POOL
+# HUGE RANDOM TOPIC POOL
 # =========================================================
 
 TOPICS = [
+
     # GAMING
     "Minecraft",
     "Minecraft history",
@@ -26,6 +27,7 @@ TOPICS = [
     "Minecraft development",
     "Minecraft secrets",
     "Minecraft records",
+    "Minecraft inventions",
     "Roblox",
     "Roblox history",
     "Roblox games",
@@ -49,6 +51,8 @@ TOPICS = [
     "Mercury",
     "Jupiter",
     "Saturn",
+    "Uranus",
+    "Neptune",
     "black holes",
     "stars",
     "astronomy",
@@ -111,7 +115,7 @@ TOPICS = [
     "lost cities",
     "historical mysteries",
 
-    # PLACES
+    # PLACES / EARTH
     "oceans",
     "deep ocean",
     "mountains",
@@ -144,6 +148,10 @@ TOPICS = [
 ]
 
 
+# =========================================================
+# HOOKS
+# =========================================================
+
 HOOKS = [
     "STOP SCROLLING — THIS IS REAL.",
     "THIS SOUNDS FAKE, BUT IT'S REAL.",
@@ -153,6 +161,10 @@ HOOKS = [
     "THIS IS ONE OF THE WEIRDEST FACTS YOU'LL HEAR TODAY.",
 ]
 
+
+# =========================================================
+# BRIDGES
+# =========================================================
 
 BRIDGES = [
     "But here's where it gets crazy.",
@@ -185,8 +197,14 @@ def wiki_search(query):
 
     response.raise_for_status()
 
-    return response.json().get("pages", [])
+    data = response.json()
 
+    return data.get("pages", [])
+
+
+# =========================================================
+# GET WIKIPEDIA PAGE
+# =========================================================
 
 def wiki_page(title):
 
@@ -205,18 +223,23 @@ def wiki_page(title):
 
     response.raise_for_status()
 
-    return response.json().get("source", "")
+    data = response.json()
+
+    return data.get("source", "")
 
 
 # =========================================================
-# TEXT CLEANING
+# CLEAN TEXT
 # =========================================================
 
 def clean(text):
 
+    if not text:
+        return ""
+
     text = html.unescape(text)
 
-    # Remove Wikipedia references.
+    # Remove Wikipedia-style references.
     text = re.sub(
         r"\[[^\]]*\]",
         "",
@@ -227,27 +250,49 @@ def clean(text):
     text = re.sub(
         r"https?://\S+",
         "",
+        text,
+        flags=re.I
+    )
+
+    # Remove email-like strings.
+    text = re.sub(
+        r"\S+@\S+\.\S+",
+        "",
         text
     )
 
-    # Remove obvious article identifiers.
+    # Remove obvious identifiers.
     text = re.sub(
-        r"\b(?:doi|isbn|issn|article|pmid|id)\s*[:#]?\s*[\w./-]*\d[\w./-]*",
+        r"\b(?:doi|isbn|issn|pmid|oclc|id)\s*[:#]?\s*[\w./-]+",
         "",
         text,
         flags=re.I
     )
 
-    # Remove long garbage alphanumeric strings.
+    # Remove long random alphanumeric identifiers.
     text = re.sub(
         r"\b[a-zA-Z]*\d[a-zA-Z0-9_-]{8,}\b",
         "",
         text
     )
 
+    # Remove standalone long numbers.
+    text = re.sub(
+        r"\b\d{7,}\b",
+        "",
+        text
+    )
+
+    # Remove obvious slash-number IDs.
+    text = re.sub(
+        r"\b\d+\s*/\s*\d+(?:[-_/]\d+)*\b",
+        "",
+        text
+    )
+
     # Remove repeated punctuation.
     text = re.sub(
-        r"[|]{2,}",
+        r"[|]{1,}",
         " ",
         text
     )
@@ -262,7 +307,7 @@ def clean(text):
 
 
 # =========================================================
-# SENTENCE EXTRACTION
+# SPLIT INTO SENTENCES
 # =========================================================
 
 def sentences_from(text):
@@ -283,7 +328,7 @@ def sentences_from(text):
         if len(sentence) < 45:
             continue
 
-        if len(sentence) > 320:
+        if len(sentence) > 360:
             continue
 
         result.append(sentence)
@@ -292,26 +337,46 @@ def sentences_from(text):
 
 
 # =========================================================
-# GARBAGE DETECTOR
+# EXTREMELY STRICT GARBAGE FILTER
 # =========================================================
 
 def is_bad(sentence):
 
+    if not sentence:
+        return True
+
     low = sentence.lower()
 
-    # Obvious metadata.
+    # -----------------------------------------------------
+    # Metadata words
+    # -----------------------------------------------------
+
     bad_words = [
+
         "doi",
         "isbn",
         "issn",
         "pmid",
+        "oclc",
+
         "article number",
         "citation needed",
-        "edit",
         "retrieved",
         "archived",
         "references",
         "external links",
+
+        "edit",
+        "identifier",
+        "bibliography",
+
+        "accessed",
+        "publisher",
+        "journal",
+        "volume",
+        "issue",
+        "pages",
+
     ]
 
     if any(
@@ -320,43 +385,151 @@ def is_bad(sentence):
     ):
         return True
 
-    # URLs.
-    if "http://" in low or "https://" in low:
+    # -----------------------------------------------------
+    # URLs
+    # -----------------------------------------------------
+
+    if "http://" in low:
         return True
 
-    # Too many numbers = probably metadata.
+    if "https://" in low:
+        return True
+
+    if "www." in low:
+        return True
+
+    # -----------------------------------------------------
+    # Random number IDs
+    #
+    # Examples rejected:
+    #
+    # 7647647
+    # 7647647/48584
+    # 7647647/48584-874584
+    # -----------------------------------------------------
+
+    if re.search(
+        r"\d{6,}",
+        sentence
+    ):
+        return True
+
+    if re.search(
+        r"\b\d+\s*/\s*\d+\b",
+        sentence
+    ):
+        return True
+
+    if re.search(
+        r"\b\d+[-_/]\d+[-_/]?\d*\b",
+        sentence
+    ):
+        return True
+
+    # -----------------------------------------------------
+    # Long mixed identifiers
+    # -----------------------------------------------------
+
+    if re.search(
+        r"\b[a-zA-Z0-9_-]{13,}\b",
+        sentence
+    ):
+        return True
+
+    # -----------------------------------------------------
+    # Weird technical strings
+    # -----------------------------------------------------
+
+    if re.search(
+        r"[A-Za-z]+\d{4,}",
+        sentence
+    ):
+        return True
+
+    # -----------------------------------------------------
+    # Too many numbers
+    # -----------------------------------------------------
+
     numbers = re.findall(
         r"\d+",
         sentence
     )
 
-    if len(numbers) > 6:
+    if len(numbers) > 5:
         return True
 
-    # Long strings containing mixed letters/numbers.
-    garbage = re.findall(
-        r"\b\w*\d\w{7,}\b",
-        sentence
+    # -----------------------------------------------------
+    # Too much punctuation
+    # -----------------------------------------------------
+
+    if sentence.count("/") > 1:
+        return True
+
+    if sentence.count("_") > 0:
+        return True
+
+    if sentence.count("|") > 0:
+        return True
+
+    if sentence.count("{") > 0:
+        return True
+
+    if sentence.count("}") > 0:
+        return True
+
+    # -----------------------------------------------------
+    # Sentence length
+    # -----------------------------------------------------
+
+    words = sentence.split()
+
+    if len(words) < 8:
+        return True
+
+    if len(words) > 55:
+        return True
+
+    # -----------------------------------------------------
+    # Reject obvious list/table fragments
+    # -----------------------------------------------------
+
+    if sentence.startswith(
+        (
+            "ISBN",
+            "ISSN",
+            "DOI",
+            "PMID",
+            "Retrieved",
+            "Archived",
+            "References",
+        )
+    ):
+        return True
+
+    # -----------------------------------------------------
+    # Reject sentences with strange character density
+    # -----------------------------------------------------
+
+    letters = sum(
+        c.isalpha()
+        for c in sentence
     )
 
-    if garbage:
-        return True
+    if len(sentence) > 0:
 
-    # Weird punctuation.
-    if sentence.count("/") > 3:
-        return True
+        letter_ratio = (
+            letters /
+            len(sentence)
+        )
 
-    if sentence.count("_") > 1:
-        return True
-
-    if len(sentence.split()) < 8:
-        return True
+        if letter_ratio < 0.55:
+            return True
 
     return False
 
 
 # =========================================================
-# FACT SCORING
+# FACT QUALITY SCORE
 # =========================================================
 
 def score_sentence(sentence):
@@ -365,39 +538,58 @@ def score_sentence(sentence):
 
     score = 0
 
-    # Concrete information.
+    # -----------------------------------------------------
+    # Concrete facts
+    # -----------------------------------------------------
+
     if re.search(
         r"\d",
         sentence
     ):
         score += 3
 
-    # Strong fact words.
+    # -----------------------------------------------------
+    # Interesting fact language
+    # -----------------------------------------------------
+
     strong_words = [
+
         "first",
         "largest",
         "smallest",
         "longest",
         "shortest",
+
         "only",
         "record",
+
         "discovered",
         "invented",
         "created",
         "built",
         "developed",
+
         "originally",
         "became",
         "survived",
+
         "contains",
         "weighs",
         "measures",
         "takes",
+
         "can",
         "more than",
         "less than",
+
         "million",
         "billion",
+
+        "rare",
+        "unique",
+        "unusual",
+        "unexpected",
+
     ]
 
     for word in strong_words:
@@ -405,47 +597,80 @@ def score_sentence(sentence):
         if word in low:
             score += 2
 
-    # Prefer medium-length narration.
+    # -----------------------------------------------------
+    # Good narration length
+    # -----------------------------------------------------
+
     words = len(
         sentence.split()
     )
 
     if 12 <= words <= 35:
-        score += 4
+        score += 5
 
     elif 36 <= words <= 50:
         score += 2
 
-    # Penalize extremely academic language.
-    academic = [
-        "according to",
+    # -----------------------------------------------------
+    # Penalize academic writing
+    # -----------------------------------------------------
+
+    academic_words = [
+
         "methodology",
-        "et al.",
-        "statistical",
         "hypothesis",
         "correlation",
+        "statistical",
+        "et al.",
+        "theorem",
+        "equation",
+        "dataset",
+
     ]
 
-    for word in academic:
+    for word in academic_words:
 
         if word in low:
-            score -= 3
+            score -= 4
+
+    # -----------------------------------------------------
+    # Penalize boring definitions
+    # -----------------------------------------------------
+
+    if low.startswith(
+        (
+            "is a",
+            "is an",
+            "refers to",
+            "is the",
+            "are the",
+        )
+    ):
+        score -= 2
 
     return score
 
 
 # =========================================================
-# FIND A FACT
+# FIND FACT
 # =========================================================
 
 def choose_fact(topic):
 
     queries = [
+
         topic,
+
         f"{topic} interesting facts",
-        f"{topic} history",
+
         f"{topic} unusual facts",
+
+        f"{topic} history",
+
         f"{topic} records",
+
+        f"{topic} discoveries",
+
     ]
 
     random.shuffle(
@@ -456,12 +681,12 @@ def choose_fact(topic):
 
     for query in queries:
 
-        try:
+        print(
+            "Searching:",
+            query
+        )
 
-            print(
-                "Searching:",
-                query
-            )
+        try:
 
             pages = wiki_search(
                 query
@@ -491,13 +716,21 @@ def choose_fact(topic):
                     title
                 )
 
-            except Exception:
+            except Exception as error:
+
+                print(
+                    "Page failed:",
+                    title,
+                    error
+                )
 
                 continue
 
-            for sentence in sentences_from(
+            sentences = sentences_from(
                 source
-            ):
+            )
+
+            for sentence in sentences:
 
                 if is_bad(
                     sentence
@@ -508,8 +741,8 @@ def choose_fact(topic):
                     sentence
                 )
 
-                # Small randomness prevents identical
-                # top-ranked facts every time.
+                # Random variation so the same
+                # top sentence isn't always selected.
                 score += random.uniform(
                     0,
                     3
@@ -519,24 +752,29 @@ def choose_fact(topic):
                     (
                         score,
                         title,
-                        sentence,
+                        sentence
                     )
                 )
 
     if not candidates:
 
         raise RuntimeError(
-            "Could not find a clean fact from the web."
+            "Could not find a clean fact from Wikipedia."
         )
 
     candidates.sort(
+        key=lambda x: x[0],
         reverse=True
     )
 
-    # Pick from the strongest candidates instead
-    # of always taking exactly #1.
+    # Don't always choose absolute #1.
+    top_count = min(
+        15,
+        len(candidates)
+    )
+
     top = candidates[
-        :min(12, len(candidates))
+        :top_count
     ]
 
     chosen = random.choice(
@@ -550,7 +788,7 @@ def choose_fact(topic):
 
 
 # =========================================================
-# SELECT TOPIC
+# RANDOM TOPIC
 # =========================================================
 
 topic = random.choice(
@@ -559,9 +797,22 @@ topic = random.choice(
 
 print()
 print(
-    "Selected topic:",
+    "=" * 60
+)
+
+print(
+    "RANDOM TOPIC:",
     topic
 )
+
+print(
+    "=" * 60
+)
+
+
+# =========================================================
+# FIND FACT
+# =========================================================
 
 title, fact = choose_fact(
     topic
@@ -571,8 +822,9 @@ fact = clean(
     fact
 )
 
+
 # =========================================================
-# FINAL SAFETY CHECK
+# FINAL QUALITY CHECK
 # =========================================================
 
 if is_bad(
@@ -580,11 +832,12 @@ if is_bad(
 ):
 
     raise RuntimeError(
-        "The selected fact failed the quality filter."
+        "Selected fact failed the garbage filter."
     )
 
+
 # =========================================================
-# CREATE SCRIPT
+# HOOK + BRIDGES
 # =========================================================
 
 hook = random.choice(
@@ -599,17 +852,27 @@ bridge2 = random.choice(
     BRIDGES
 )
 
-# Keep individual narration lines short enough
-# for fast captions and good pacing.
+
+# =========================================================
+# NARRATION
+# =========================================================
 
 lines = [
+
     hook,
+
     title.upper(),
+
     bridge1,
+
     fact,
+
     bridge2,
+
     "And that's what makes this so strange.",
-    "Would you have guessed that?"
+
+    "Would you have guessed that?",
+
 ]
 
 
@@ -618,18 +881,27 @@ lines = [
 # =========================================================
 
 visual_terms = [
+
     topic,
+
     title,
+
     f"{topic} photo",
+
     f"{topic} close up",
+
     f"{topic} history",
-    f"{title} photo",
-    f"{title} history",
+
     f"{topic} documentary",
+
+    f"{title} photo",
+
+    f"{title} history",
+
 ]
 
 
-# Remove duplicates while preserving order.
+# Remove duplicates.
 
 visual_terms = list(
     dict.fromkeys(
@@ -643,41 +915,61 @@ visual_terms = list(
 # =========================================================
 
 selected = {
+
     "topic": topic,
+
     "title": title,
+
     "fact": fact,
+
     "visual_terms": visual_terms,
+
 }
 
 
 (WORK / "selected.json").write_text(
+
     json.dumps(
         selected,
         ensure_ascii=False,
         indent=2
     ),
+
     encoding="utf-8"
+
 )
 
 
 # =========================================================
-# SAVE NARRATION
+# SAVE SCRIPT
 # =========================================================
 
 (WORK / "script.txt").write_text(
+
     "\n".join(lines),
+
     encoding="utf-8"
+
 )
 
 
 # =========================================================
-# OUTPUT
+# PRINT RESULTS
 # =========================================================
 
 print()
-print("=" * 60)
-print("VIRAL FACTS GENERATOR")
-print("=" * 60)
+
+print(
+    "=" * 60
+)
+
+print(
+    "FACT SELECTED"
+)
+
+print(
+    "=" * 60
+)
 
 print(
     "Topic:",
@@ -685,11 +977,12 @@ print(
 )
 
 print(
-    "Source:",
+    "Wikipedia source:",
     title
 )
 
 print()
+
 print(
     "NARRATION:"
 )
@@ -699,14 +992,26 @@ print(
 )
 
 print()
+
 print(
     "VISUAL SEARCH TERMS:"
 )
 
 for term in visual_terms:
+
     print(
         "-",
         term
     )
 
-print("=" * 60)
+print(
+    "=" * 60
+)
+
+print(
+    "Generator completed successfully."
+)
+
+print(
+    "=" * 60
+)
