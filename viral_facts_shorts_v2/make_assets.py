@@ -1,372 +1,420 @@
 import json
 import pathlib
-import requests
 import random
-import time
 import re
+import time
+import requests
+from urllib.parse import quote
 
 ROOT = pathlib.Path(__file__).parent
 WORK = ROOT / "work"
+
 IMAGES = WORK / "images"
+VIDEOS = WORK / "videos"
 
-WORK.mkdir(exist_ok=True)
-IMAGES.mkdir(exist_ok=True)
+IMAGES.mkdir(parents=True, exist_ok=True)
+VIDEOS.mkdir(parents=True, exist_ok=True)
+
+# Clean old assets
+for folder in (IMAGES, VIDEOS):
+    for f in folder.iterdir():
+        if f.is_file():
+            try:
+                f.unlink()
+            except Exception:
+                pass
+
+UA = (
+    "Mozilla/5.0 (compatible; ViralFactsShorts/4.0; "
+    "+https://github.com/CFALOM/youtube-automation)"
+)
+
+SESSION = requests.Session()
+SESSION.headers.update({
+    "User-Agent": UA,
+    "Accept": "application/json",
+})
+
 
 # =========================================================
-# CLEAN OLD VISUALS
+# LOAD SELECTED FACT
 # =========================================================
 
-for f in IMAGES.glob("*"):
-    try:
-        f.unlink()
-    except Exception:
-        pass
+selected_path = WORK / "selected.json"
 
-# =========================================================
-# LOAD FACT
-# =========================================================
+if not selected_path.exists():
+    raise RuntimeError("work/selected.json does not exist.")
 
 selected = json.loads(
-    (WORK / "selected.json").read_text(
-        encoding="utf-8"
-    )
+    selected_path.read_text(encoding="utf-8")
 )
 
 topic = selected.get("topic", "")
 title = selected.get("title", "")
 fact = selected.get("fact", "")
 
+if not topic or not fact:
+    raise RuntimeError("selected.json is missing topic or fact.")
+
+
+# =========================================================
+# BUILD SMART VISUAL QUERIES
+# =========================================================
+
+def words(text):
+    return re.findall(r"[A-Za-z0-9]+", text.lower())
+
+
+def important_terms(text):
+    stop = {
+        "the", "and", "that", "this", "with", "from", "were",
+        "was", "are", "for", "into", "about", "their", "they",
+        "have", "has", "had", "which", "when", "where", "what",
+        "why", "how", "than", "then", "also", "only", "more",
+        "most", "some", "many", "very", "first", "part"
+    }
+
+    result = []
+
+    for w in words(text):
+        if len(w) >= 4 and w not in stop and w not in result:
+            result.append(w)
+
+    return result[:8]
+
+
+key_terms = important_terms(f"{topic} {title} {fact}")
+
+queries = []
+
+# Most specific searches first.
+if title:
+    queries.append(f"{title} photo")
+
+if title and topic:
+    queries.append(f"{topic} {title}")
+
+if key_terms:
+    queries.append(" ".join(key_terms[:4]))
+
+if topic:
+    queries.append(f"{topic} real photo")
+
+if topic:
+    queries.append(f"{topic} close up")
+
+if topic:
+    queries.append(f"{topic} history")
+
+# Remove duplicates
+queries = list(dict.fromkeys(
+    q.strip() for q in queries if q.strip()
+))
+
+print()
 print("=" * 60)
 print("SMART VISUAL ENGINE")
 print("=" * 60)
 print("Topic:", topic)
 print("Title:", title)
+print("Queries:")
+
+for q in queries:
+    print("-", q)
+
 
 # =========================================================
-# SEARCH TERMS
+# OPENVERSE SEARCH
 # =========================================================
 
-terms = [
-    title,
-    topic,
-    f"{title} photo",
-    f"{topic} photo",
-]
+OPENVERSE = "https://api.openverse.org/v1/images/"
 
-# remove duplicates
-terms = list(dict.fromkeys(
-    x.strip()
-    for x in terms
-    if x.strip()
-))
-
-random.shuffle(terms)
-
-print()
-print("Visual searches:")
-
-for term in terms:
-    print("-", term)
-
-# =========================================================
-# SOURCE 1:
-# WIKIMEDIA COMMONS
-#
-# Only ONE request.
-# If rate limited, continue immediately.
-# =========================================================
-
-def commons_search(term):
-
-    url = "https://commons.wikimedia.org/w/api.php"
-
-    params = {
-        "action": "query",
-        "generator": "search",
-        "gsrsearch": term,
-        "gsrnamespace": 6,
-        "gsrlimit": 8,
-        "prop": "imageinfo",
-        "iiprop": "url|mime",
-        "iiurlwidth": 1200,
-        "format": "json",
-    }
-
+def openverse_search(query, page_size=20):
     try:
-
-        r = requests.get(
-            url,
-            params=params,
-            headers={
-                "User-Agent":
-                "ViralFactsShorts/2.0 contact"
+        response = SESSION.get(
+            OPENVERSE,
+            params={
+                "q": query,
+                "page_size": page_size,
             },
-            timeout=8
+            timeout=25,
         )
 
-        if r.status_code == 429:
-            print("Wikimedia rate limited.")
-            return []
+        if response.status_code == 429:
+            retry = response.headers.get("Retry-After", "10")
 
-        r.raise_for_status()
+            try:
+                retry = min(int(retry), 30)
+            except Exception:
+                retry = 10
 
-        data = r.json()
-
-        pages = (
-            data
-            .get("query", {})
-            .get("pages", {})
-        )
-
-        results = []
-
-        for page in pages.values():
-
-            info = (
-                page.get("imageinfo")
-                or []
+            print(
+                f"Openverse rate limited. Waiting {retry}s..."
             )
 
-            if not info:
-                continue
+            time.sleep(retry)
 
-            item = info[0]
-
-            url = (
-                item.get("thumburl")
-                or item.get("url")
+            response = SESSION.get(
+                OPENVERSE,
+                params={
+                    "q": query,
+                    "page_size": page_size,
+                },
+                timeout=25,
             )
 
-            if not url:
-                continue
+        response.raise_for_status()
 
-            mime = item.get(
-                "mime",
-                ""
-            )
+        return response.json().get("results", [])
 
-            if not mime.startswith(
-                "image/"
-            ):
-                continue
-
-            if re.search(
-                r"\.(svg|gif|tif|tiff)$",
-                url,
-                re.I
-            ):
-                continue
-
-            results.append(url)
-
-        return results
-
-    except Exception as e:
-
-        print(
-            "Wikimedia unavailable:",
-            str(e)[:120]
-        )
-
+    except Exception as error:
+        print("Openverse search failed:", error)
         return []
 
 
 # =========================================================
-# SOURCE 2:
-# WIKIPEDIA PAGE IMAGE
-#
-# This is different from Commons search.
+# QUALITY FILTER
 # =========================================================
 
-def wikipedia_image(term):
+def score_result(item, query):
+    score = 0
 
-    try:
+    width = item.get("width") or 0
+    height = item.get("height") or 0
 
-        url = (
-            "https://en.wikipedia.org/w/api.php"
-        )
+    if width >= 900:
+        score += 2
 
-        params = {
-            "action": "query",
-            "generator": "search",
-            "gsrsearch": term,
-            "gsrnamespace": 0,
-            "gsrlimit": 3,
-            "prop": "pageimages",
-            "piprop": "original",
-            "format": "json",
-        }
+    if height >= 900:
+        score += 2
 
-        r = requests.get(
-            url,
-            params=params,
-            headers={
-                "User-Agent":
-                "ViralFactsShorts/2.0"
-            },
-            timeout=8
-        )
+    if width >= 1200:
+        score += 1
 
-        if r.status_code == 429:
-            print("Wikipedia rate limited.")
-            return []
+    if height >= 1200:
+        score += 1
 
-        r.raise_for_status()
+    # Prefer portrait/square images because they work better
+    # with Shorts.
+    if height > width:
+        score += 3
 
-        data = r.json()
+    # Avoid tiny thumbnails.
+    if width < 500 or height < 500:
+        score -= 5
 
-        pages = (
-            data
-            .get("query", {})
-            .get("pages", {})
-        )
+    # Title/description relevance.
+    text = (
+        str(item.get("title", "")) + " " +
+        str(item.get("description", ""))
+    ).lower()
 
-        results = []
+    for term in important_terms(query):
+        if term in text:
+            score += 2
 
-        for page in pages.values():
-
-            image = page.get(
-                "original"
-            )
-
-            if not image:
-                continue
-
-            img = image.get("source")
-
-            if img:
-                results.append(img)
-
-        return results
-
-    except Exception as e:
-
-        print(
-            "Wikipedia image search failed:",
-            str(e)[:120]
-        )
-
-        return []
+    return score
 
 
-# =========================================================
-# COLLECT URLS
-# =========================================================
-
-urls = []
-
-# Try only the best term first.
-# This prevents huge numbers of requests.
-
-best_term = terms[0]
-
-print()
-print(
-    "Searching best visual term:",
-    best_term
-)
-
-urls.extend(
-    commons_search(best_term)
-)
-
-# If Commons is blocked, try Wikipedia.
-if len(urls) < 4:
-
-    print(
-        "Trying Wikipedia visual source..."
+def get_image_url(item):
+    return (
+        item.get("url")
+        or item.get("thumbnail")
+        or item.get("source")
     )
 
-    urls.extend(
-        wikipedia_image(best_term)
+
+# =========================================================
+# COLLECT VISUALS
+# =========================================================
+
+candidates = []
+seen = set()
+
+for query in queries:
+
+    print()
+    print("Searching:", query)
+
+    results = openverse_search(query)
+
+    print("Results:", len(results))
+
+    ranked = []
+
+    for item in results:
+
+        url = get_image_url(item)
+
+        if not url:
+            continue
+
+        if url in seen:
+            continue
+
+        score = score_result(item, query)
+
+        if score < 0:
+            continue
+
+        ranked.append((score, item))
+
+    ranked.sort(
+        key=lambda x: x[0],
+        reverse=True
     )
 
-# Remove duplicates
-urls = list(dict.fromkeys(urls))
+    for score, item in ranked[:8]:
 
-print()
-print(
-    "Visual URLs found:",
-    len(urls)
+        url = get_image_url(item)
+
+        if url in seen:
+            continue
+
+        seen.add(url)
+
+        candidates.append({
+            "score": score,
+            "url": url,
+            "title": item.get("title", ""),
+            "source": item.get("source", ""),
+            "license": item.get("license", ""),
+            "creator": item.get("creator", ""),
+            "query": query,
+            "width": item.get("width", 0),
+            "height": item.get("height", 0),
+        })
+
+    # We don't need hundreds of images.
+    if len(candidates) >= 30:
+        break
+
+
+# =========================================================
+# SORT + RANDOMIZE TOP QUALITY
+# =========================================================
+
+candidates.sort(
+    key=lambda x: x["score"],
+    reverse=True
 )
+
+# Keep strong candidates but introduce some variety.
+best = candidates[:20]
+
+random.shuffle(best)
+
 
 # =========================================================
 # DOWNLOAD
 # =========================================================
 
-session = requests.Session()
+def download_image(url, output):
+    response = SESSION.get(
+        url,
+        timeout=35,
+        allow_redirects=True,
+    )
 
-session.headers.update({
-    "User-Agent":
-    "Mozilla/5.0 ViralFactsShorts/2.0"
-})
+    response.raise_for_status()
 
-downloaded = 0
+    data = response.content
 
-for url in urls:
+    if len(data) < 15000:
+        raise RuntimeError("Image is suspiciously small.")
 
-    if downloaded >= 8:
+    content_type = response.headers.get(
+        "Content-Type",
+        ""
+    ).lower()
+
+    if (
+        "image" not in content_type
+        and not url.lower().split("?")[0].endswith(
+            (".jpg", ".jpeg", ".png", ".webp")
+        )
+    ):
+        raise RuntimeError(
+            f"Not an image response: {content_type}"
+        )
+
+    output.write_bytes(data)
+
+
+downloaded = []
+attempted = 0
+
+for item in best:
+
+    if len(downloaded) >= 12:
         break
+
+    attempted += 1
 
     output = (
         IMAGES /
-        f"image_{downloaded:02d}.jpg"
+        f"image_{len(downloaded):02d}.jpg"
     )
 
-    print()
     print(
-        "Downloading visual",
-        downloaded + 1
+        "Downloading:",
+        item["title"][:80]
     )
 
     try:
 
-        r = session.get(
-            url,
-            timeout=10
+        download_image(
+            item["url"],
+            output
         )
 
-        if r.status_code == 429:
-
-            print(
-                "Download rate limited."
-            )
-
-            continue
-
-        r.raise_for_status()
-
-        data = r.content
-
-        # Don't accept tiny garbage files.
-        if len(data) < 15000:
-
-            print(
-                "Skipped tiny file."
-            )
-
-            continue
-
-        output.write_bytes(
-            data
-        )
-
-        downloaded += 1
+        downloaded.append({
+            **item,
+            "filename": output.name,
+        })
 
         print(
-            "Saved:",
-            output.name,
-            f"({len(data)//1024} KB)"
+            "OK:",
+            output.name
         )
 
-        time.sleep(0.5)
-
-    except Exception as e:
+    except Exception as error:
 
         print(
             "Download failed:",
-            str(e)[:120]
+            error
         )
+
+        try:
+            if output.exists():
+                output.unlink()
+        except Exception:
+            pass
+
+    # Don't hammer the API.
+    time.sleep(1)
+
+
+# =========================================================
+# SAVE VISUAL METADATA
+# =========================================================
+
+visual_data = {
+    "topic": topic,
+    "title": title,
+    "fact": fact,
+    "images": downloaded,
+}
+
+(WORK / "visuals.json").write_text(
+    json.dumps(
+        visual_data,
+        ensure_ascii=False,
+        indent=2,
+    ),
+    encoding="utf-8",
+)
+
 
 # =========================================================
 # RESULT
@@ -376,15 +424,15 @@ print()
 print("=" * 60)
 print("VISUAL SEARCH COMPLETE")
 print("=" * 60)
-print("Images:", downloaded)
+print("Candidates:", len(candidates))
+print("Download attempts:", attempted)
+print("Images:", len(downloaded))
 print("=" * 60)
 
-# IMPORTANT:
-# Don't create a generic fake visual.
-# But don't fail if only a few real images exist.
-if downloaded == 0:
 
+# We need enough visuals to make a genuinely dynamic Short.
+if len(downloaded) < 4:
     raise RuntimeError(
-        "No real visual could be downloaded. "
-        "The visual source is unavailable."
+        f"Only {len(downloaded)} usable visuals were downloaded. "
+        "The workflow stopped instead of creating a low-quality Short."
     )
