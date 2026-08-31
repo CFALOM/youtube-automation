@@ -1,4 +1,3 @@
-```yaml
 name: AI Long Video Generator
 
 on:
@@ -35,4 +34,3 @@ jobs:
           name: generated-long-video
           path: viral_facts_long_v1/work/final.mp4
           if-no-files-found: error
-```
