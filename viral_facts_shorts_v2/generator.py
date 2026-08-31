@@ -10,38 +10,40 @@ ROOT = pathlib.Path(__file__).parent
 WORK = ROOT / "work"
 WORK.mkdir(exist_ok=True)
 
-UA = "ViralFactsShorts/FINAL-2.0 (educational-short-generator)"
+UA = "ViralFactsShorts/Final/1.0"
 
-
-# =========================================================
-# HUGE RANDOM TOPIC POOL
-# =========================================================
+# ============================================================
+# TOPICS
+# ============================================================
 
 TOPICS = [
-
     # GAMING
     "Minecraft",
     "Minecraft history",
     "Minecraft mobs",
-    "Minecraft updates",
-    "Minecraft development",
     "Minecraft secrets",
+    "Minecraft development",
+    "Minecraft updates",
     "Minecraft records",
-    "Minecraft inventions",
+    "Minecraft early versions",
+
     "Roblox",
     "Roblox history",
-    "Roblox games",
     "Roblox development",
+
     "Fortnite",
     "Fortnite history",
+
     "GTA",
     "GTA history",
+
     "Nintendo",
+    "Nintendo history",
     "PlayStation",
+    "PlayStation history",
     "Xbox",
     "video game history",
     "arcade games",
-    "gaming records",
 
     # SCIENCE
     "space",
@@ -51,18 +53,15 @@ TOPICS = [
     "Mercury",
     "Jupiter",
     "Saturn",
-    "Uranus",
-    "Neptune",
     "black holes",
     "stars",
     "astronomy",
     "NASA",
     "physics",
-    "chemistry",
     "biology",
+    "chemistry",
     "evolution",
     "quantum physics",
-    "science discoveries",
 
     # ANIMALS
     "octopus",
@@ -77,9 +76,7 @@ TOPICS = [
     "spiders",
     "ants",
     "bees",
-    "birds",
     "deep sea animals",
-    "weird animals",
 
     # HUMAN
     "human body",
@@ -98,7 +95,6 @@ TOPICS = [
     "Google",
     "YouTube history",
     "social media history",
-    "web history",
     "computer history",
     "robotics",
     "inventions",
@@ -109,13 +105,11 @@ TOPICS = [
     "ancient Egypt",
     "medieval history",
     "world history",
-    "war history",
     "historical discoveries",
-    "famous inventions",
     "lost cities",
     "historical mysteries",
 
-    # PLACES / EARTH
+    # PLACES
     "oceans",
     "deep ocean",
     "mountains",
@@ -139,45 +133,45 @@ TOPICS = [
     "money history",
 
     # WEIRD
-    "weird facts",
+    "weird science",
+    "weird history",
     "strange discoveries",
     "unusual inventions",
-    "weird history",
-    "strange places",
-    "mysterious events",
+    "strange animals",
 ]
 
 
-# =========================================================
+# ============================================================
 # HOOKS
-# =========================================================
+# ============================================================
 
 HOOKS = [
-    "STOP SCROLLING — THIS IS REAL.",
-    "THIS SOUNDS FAKE, BUT IT'S REAL.",
-    "YOU PROBABLY DIDN'T KNOW THIS.",
-    "THIS FACT GETS CRAZIER THE MORE YOU THINK ABOUT IT.",
-    "ALMOST NOBODY KNOWS THIS.",
-    "THIS IS ONE OF THE WEIRDEST FACTS YOU'LL HEAR TODAY.",
+    "WAIT — YOU NEED TO KNOW THIS.",
+    "THIS SOUNDS COMPLETELY FAKE.",
+    "YOU'VE PROBABLY NEVER HEARD THIS BEFORE.",
+    "THIS GETS WEIRDER IN A SECOND.",
+    "MOST PEOPLE HAVE NO IDEA THIS HAPPENED.",
+    "THIS IS ONE OF THE STRANGEST FACTS I FOUND.",
+    "YOU WON'T EXPECT WHAT HAPPENS NEXT.",
 ]
 
 
-# =========================================================
+# ============================================================
 # BRIDGES
-# =========================================================
+# ============================================================
 
 BRIDGES = [
-    "But here's where it gets crazy.",
-    "And that's not even the strange part.",
-    "But there's one detail people miss.",
-    "Now it gets even stranger.",
-    "Here's the part that surprises people.",
+    "But here's the part nobody talks about.",
+    "And this is where it gets crazy.",
+    "But there's a much stranger detail.",
+    "Here's where things get interesting.",
+    "And then something unexpected happened.",
 ]
 
 
-# =========================================================
-# WIKIPEDIA SEARCH
-# =========================================================
+# ============================================================
+# WIKIPEDIA
+# ============================================================
 
 def wiki_search(query):
 
@@ -187,7 +181,7 @@ def wiki_search(query):
         url,
         params={
             "q": query,
-            "limit": 8,
+            "limit": 10,
         },
         headers={
             "User-Agent": UA,
@@ -197,14 +191,8 @@ def wiki_search(query):
 
     response.raise_for_status()
 
-    data = response.json()
+    return response.json().get("pages", [])
 
-    return data.get("pages", [])
-
-
-# =========================================================
-# GET WIKIPEDIA PAGE
-# =========================================================
 
 def wiki_page(title):
 
@@ -223,77 +211,26 @@ def wiki_page(title):
 
     response.raise_for_status()
 
-    data = response.json()
-
-    return data.get("source", "")
+    return response.json().get("source", "")
 
 
-# =========================================================
+# ============================================================
 # CLEAN TEXT
-# =========================================================
+# ============================================================
 
 def clean(text):
 
-    if not text:
-        return ""
-
     text = html.unescape(text)
 
-    # Remove Wikipedia-style references.
     text = re.sub(
         r"\[[^\]]*\]",
         "",
         text
     )
 
-    # Remove URLs.
     text = re.sub(
         r"https?://\S+",
         "",
-        text,
-        flags=re.I
-    )
-
-    # Remove email-like strings.
-    text = re.sub(
-        r"\S+@\S+\.\S+",
-        "",
-        text
-    )
-
-    # Remove obvious identifiers.
-    text = re.sub(
-        r"\b(?:doi|isbn|issn|pmid|oclc|id)\s*[:#]?\s*[\w./-]+",
-        "",
-        text,
-        flags=re.I
-    )
-
-    # Remove long random alphanumeric identifiers.
-    text = re.sub(
-        r"\b[a-zA-Z]*\d[a-zA-Z0-9_-]{8,}\b",
-        "",
-        text
-    )
-
-    # Remove standalone long numbers.
-    text = re.sub(
-        r"\b\d{7,}\b",
-        "",
-        text
-    )
-
-    # Remove obvious slash-number IDs.
-    text = re.sub(
-        r"\b\d+\s*/\s*\d+(?:[-_/]\d+)*\b",
-        "",
-        text
-    )
-
-    # Remove repeated punctuation.
-    text = re.sub(
-        r"[|]{1,}",
-        " ",
         text
     )
 
@@ -306,11 +243,11 @@ def clean(text):
     return text.strip()
 
 
-# =========================================================
-# SPLIT INTO SENTENCES
-# =========================================================
+# ============================================================
+# SENTENCES
+# ============================================================
 
-def sentences_from(text):
+def get_sentences(text):
 
     text = clean(text)
 
@@ -319,447 +256,268 @@ def sentences_from(text):
         text
     )
 
-    result = []
+    output = []
 
     for sentence in pieces:
 
         sentence = sentence.strip()
 
-        if len(sentence) < 45:
+        words = sentence.split()
+
+        if len(words) < 12:
             continue
 
-        if len(sentence) > 360:
+        if len(words) > 55:
             continue
 
-        result.append(sentence)
+        output.append(sentence)
 
-    return result
+    return output
 
 
-# =========================================================
-# EXTREMELY STRICT GARBAGE FILTER
-# =========================================================
+# ============================================================
+# BORING / BAD FACT FILTER
+# ============================================================
 
-def is_bad(sentence):
-
-    if not sentence:
-        return True
+def bad_fact(sentence):
 
     low = sentence.lower()
 
-    # -----------------------------------------------------
-    # Metadata words
-    # -----------------------------------------------------
-
-    bad_words = [
-
-        "doi",
-        "isbn",
-        "issn",
-        "pmid",
-        "oclc",
-
-        "article number",
+    banned = [
         "citation needed",
-        "retrieved",
-        "archived",
         "references",
         "external links",
-
-        "edit",
-        "identifier",
+        "isbn",
+        "doi",
+        "pmid",
+        "retrieved",
+        "archived",
+        "according to",
+        "statistical",
+        "methodology",
         "bibliography",
-
-        "accessed",
-        "publisher",
-        "journal",
-        "volume",
-        "issue",
-        "pages",
-
+        "et al",
     ]
 
-    if any(
-        word in low
-        for word in bad_words
-    ):
+    if any(x in low for x in banned):
         return True
 
-    # -----------------------------------------------------
-    # URLs
-    # -----------------------------------------------------
-
-    if "http://" in low:
-        return True
-
-    if "https://" in low:
-        return True
-
-    if "www." in low:
-        return True
-
-    # -----------------------------------------------------
-    # Random number IDs
-    #
-    # Examples rejected:
-    #
-    # 7647647
-    # 7647647/48584
-    # 7647647/48584-874584
-    # -----------------------------------------------------
-
-    if re.search(
-        r"\d{6,}",
-        sentence
-    ):
-        return True
-
-    if re.search(
-        r"\b\d+\s*/\s*\d+\b",
-        sentence
-    ):
-        return True
-
-    if re.search(
-        r"\b\d+[-_/]\d+[-_/]?\d*\b",
-        sentence
-    ):
-        return True
-
-    # -----------------------------------------------------
-    # Long mixed identifiers
-    # -----------------------------------------------------
-
-    if re.search(
-        r"\b[a-zA-Z0-9_-]{13,}\b",
-        sentence
-    ):
-        return True
-
-    # -----------------------------------------------------
-    # Weird technical strings
-    # -----------------------------------------------------
-
-    if re.search(
-        r"[A-Za-z]+\d{4,}",
-        sentence
-    ):
-        return True
-
-    # -----------------------------------------------------
-    # Too many numbers
-    # -----------------------------------------------------
-
-    numbers = re.findall(
-        r"\d+",
-        sentence
-    )
+    # Don't select sentences that are mostly dates/numbers.
+    numbers = re.findall(r"\d+", sentence)
 
     if len(numbers) > 5:
         return True
 
-    # -----------------------------------------------------
-    # Too much punctuation
-    # -----------------------------------------------------
+    # Avoid extremely technical writing.
+    technical = [
+        "algorithm",
+        "implementation",
+        "parameter",
+        "coefficient",
+        "derivative",
+        "equation",
+        "specification",
+        "protocol",
+        "architecture",
+    ]
 
-    if sentence.count("/") > 1:
-        return True
-
-    if sentence.count("_") > 0:
-        return True
-
-    if sentence.count("|") > 0:
-        return True
-
-    if sentence.count("{") > 0:
-        return True
-
-    if sentence.count("}") > 0:
-        return True
-
-    # -----------------------------------------------------
-    # Sentence length
-    # -----------------------------------------------------
-
-    words = sentence.split()
-
-    if len(words) < 8:
-        return True
-
-    if len(words) > 55:
-        return True
-
-    # -----------------------------------------------------
-    # Reject obvious list/table fragments
-    # -----------------------------------------------------
-
-    if sentence.startswith(
-        (
-            "ISBN",
-            "ISSN",
-            "DOI",
-            "PMID",
-            "Retrieved",
-            "Archived",
-            "References",
-        )
-    ):
-        return True
-
-    # -----------------------------------------------------
-    # Reject sentences with strange character density
-    # -----------------------------------------------------
-
-    letters = sum(
-        c.isalpha()
-        for c in sentence
+    technical_count = sum(
+        1 for word in technical
+        if word in low
     )
 
-    if len(sentence) > 0:
-
-        letter_ratio = (
-            letters /
-            len(sentence)
-        )
-
-        if letter_ratio < 0.55:
-            return True
+    if technical_count >= 2:
+        return True
 
     return False
 
 
-# =========================================================
-# FACT QUALITY SCORE
-# =========================================================
+# ============================================================
+# INTEREST SCORE
+# ============================================================
 
-def score_sentence(sentence):
+def score_fact(sentence):
 
     low = sentence.lower()
+    words = sentence.split()
 
     score = 0
 
-    # -----------------------------------------------------
-    # Concrete facts
-    # -----------------------------------------------------
+    # Ideal short-form length.
+    if 15 <= len(words) <= 32:
+        score += 8
 
-    if re.search(
-        r"\d",
-        sentence
-    ):
-        score += 3
+    elif 33 <= len(words) <= 42:
+        score += 4
 
-    # -----------------------------------------------------
-    # Interesting fact language
-    # -----------------------------------------------------
+    else:
+        score -= 3
 
-    strong_words = [
+    # Numbers often create concrete facts.
+    if re.search(r"\d", sentence):
+        score += 4
 
+    # Strong curiosity words.
+    exciting = [
         "first",
+        "only",
+        "never",
+        "secret",
+        "strange",
+        "unexpected",
+        "accidentally",
+        "originally",
+        "hidden",
+        "discovered",
+        "invented",
+        "created",
+        "destroyed",
+        "survived",
+        "record",
         "largest",
         "smallest",
         "longest",
         "shortest",
-
-        "only",
-        "record",
-
-        "discovered",
-        "invented",
-        "created",
-        "built",
-        "developed",
-
-        "originally",
-        "became",
-        "survived",
-
-        "contains",
-        "weighs",
-        "measures",
-        "takes",
-
-        "can",
-        "more than",
-        "less than",
-
+        "rare",
+        "ancient",
         "million",
         "billion",
-
-        "rare",
-        "unique",
-        "unusual",
-        "unexpected",
-
+        "failed",
+        "changed",
+        "banned",
+        "lost",
+        "forgotten",
+        "actually",
     ]
 
-    for word in strong_words:
+    for word in exciting:
+
+        if word in low:
+            score += 3
+
+    # Good story verbs.
+    story_words = [
+        "happened",
+        "became",
+        "found",
+        "made",
+        "built",
+        "used",
+        "caused",
+        "turned",
+        "changed",
+        "led",
+    ]
+
+    for word in story_words:
 
         if word in low:
             score += 2
 
-    # -----------------------------------------------------
-    # Good narration length
-    # -----------------------------------------------------
-
-    words = len(
-        sentence.split()
-    )
-
-    if 12 <= words <= 35:
-        score += 5
-
-    elif 36 <= words <= 50:
-        score += 2
-
-    # -----------------------------------------------------
-    # Penalize academic writing
-    # -----------------------------------------------------
-
-    academic_words = [
-
-        "methodology",
-        "hypothesis",
-        "correlation",
-        "statistical",
-        "et al.",
-        "theorem",
-        "equation",
-        "dataset",
-
+    # Penalize academic language.
+    boring = [
+        "consists of",
+        "is defined as",
+        "is characterized by",
+        "classification",
+        "taxonomy",
+        "species include",
+        "chemical composition",
+        "mathematical",
+        "theoretical",
     ]
 
-    for word in academic_words:
+    for word in boring:
 
         if word in low:
-            score -= 4
+            score -= 5
 
-    # -----------------------------------------------------
-    # Penalize boring definitions
-    # -----------------------------------------------------
-
-    if low.startswith(
-        (
-            "is a",
-            "is an",
-            "refers to",
-            "is the",
-            "are the",
-        )
-    ):
-        score -= 2
+    # Randomness prevents identical results.
+    score += random.uniform(0, 4)
 
     return score
 
 
-# =========================================================
+# ============================================================
 # FIND FACT
-# =========================================================
+# ============================================================
 
 def choose_fact(topic):
 
-    queries = [
-
+    searches = [
         topic,
-
-        f"{topic} interesting facts",
-
-        f"{topic} unusual facts",
-
+        f"{topic} strange",
+        f"{topic} surprising",
+        f"{topic} unusual",
         f"{topic} history",
-
-        f"{topic} records",
-
-        f"{topic} discoveries",
-
+        f"{topic} first",
+        f"{topic} discovered",
+        f"{topic} secret",
     ]
 
-    random.shuffle(
-        queries
-    )
+    random.shuffle(searches)
 
     candidates = []
 
-    for query in queries:
+    for query in searches:
 
-        print(
-            "Searching:",
-            query
-        )
+        print("Searching:", query)
 
         try:
 
-            pages = wiki_search(
-                query
-            )
+            pages = wiki_search(query)
 
         except Exception as error:
 
-            print(
-                "Search failed:",
-                error
-            )
+            print("Search failed:", error)
 
             continue
 
+        # Randomize page order.
+        random.shuffle(pages)
+
         for page in pages:
 
-            title = page.get(
-                "title"
-            )
+            title = page.get("title")
 
             if not title:
                 continue
 
             try:
 
-                source = wiki_page(
-                    title
-                )
+                source = wiki_page(title)
 
-            except Exception as error:
-
-                print(
-                    "Page failed:",
-                    title,
-                    error
-                )
+            except Exception:
 
                 continue
 
-            sentences = sentences_from(
-                source
-            )
+            sentences = get_sentences(source)
+
+            random.shuffle(sentences)
 
             for sentence in sentences:
 
-                if is_bad(
-                    sentence
-                ):
+                if bad_fact(sentence):
                     continue
 
-                score = score_sentence(
-                    sentence
-                )
+                score = score_fact(sentence)
 
-                # Random variation so the same
-                # top sentence isn't always selected.
-                score += random.uniform(
-                    0,
-                    3
-                )
+                # Extra boost when page title is highly relevant.
+                if topic.lower() in title.lower():
+                    score += 4
 
                 candidates.append(
                     (
                         score,
                         title,
-                        sentence
+                        sentence,
                     )
                 )
 
     if not candidates:
 
         raise RuntimeError(
-            "Could not find a clean fact from Wikipedia."
+            "Could not find an interesting fact."
         )
 
     candidates.sort(
@@ -767,251 +525,149 @@ def choose_fact(topic):
         reverse=True
     )
 
-    # Don't always choose absolute #1.
+    # Choose from the strongest group instead of
+    # always choosing exactly the same result.
     top_count = min(
-        15,
+        10,
         len(candidates)
     )
 
-    top = candidates[
-        :top_count
-    ]
-
-    chosen = random.choice(
-        top
+    selected = random.choice(
+        candidates[:top_count]
     )
 
-    return (
-        chosen[1],
-        chosen[2]
-    )
+    return selected[1], selected[2]
 
 
-# =========================================================
-# RANDOM TOPIC
-# =========================================================
+# ============================================================
+# CREATE SHORT-FORM SCRIPT
+# ============================================================
 
-topic = random.choice(
-    TOPICS
-)
+topic = random.choice(TOPICS)
 
 print()
-print(
-    "=" * 60
-)
+print("=" * 60)
+print("SELECTED TOPIC:", topic)
+print("=" * 60)
 
-print(
-    "RANDOM TOPIC:",
-    topic
-)
+title, fact = choose_fact(topic)
 
-print(
-    "=" * 60
-)
+fact = clean(fact)
+
+hook = random.choice(HOOKS)
+
+bridge1 = random.choice(BRIDGES)
+
+bridge2 = random.choice(BRIDGES)
 
 
-# =========================================================
-# FIND FACT
-# =========================================================
+# ============================================================
+# MAKE FACT EASIER TO LISTEN TO
+# ============================================================
 
-title, fact = choose_fact(
-    topic
-)
-
-fact = clean(
+# Remove awkward Wikipedia-style parenthetical sections.
+fact = re.sub(
+    r"\([^)]{0,100}\)",
+    "",
     fact
 )
 
-
-# =========================================================
-# FINAL QUALITY CHECK
-# =========================================================
-
-if is_bad(
+fact = re.sub(
+    r"\s+",
+    " ",
     fact
-):
-
-    raise RuntimeError(
-        "Selected fact failed the garbage filter."
-    )
+).strip()
 
 
-# =========================================================
-# HOOK + BRIDGES
-# =========================================================
+# ============================================================
+# VISUAL TERMS
+# ============================================================
 
-hook = random.choice(
-    HOOKS
-)
-
-bridge1 = random.choice(
-    BRIDGES
-)
-
-bridge2 = random.choice(
-    BRIDGES
-)
-
-
-# =========================================================
-# NARRATION
-# =========================================================
-
-lines = [
-
-    hook,
-
-    title.upper(),
-
-    bridge1,
-
-    fact,
-
-    bridge2,
-
-    "And that's what makes this so strange.",
-
-    "Would you have guessed that?",
-
-]
-
-
-# =========================================================
-# VISUAL SEARCH TERMS
-# =========================================================
+# IMPORTANT:
+# These are specific enough to find visuals related to
+# the actual subject instead of generic stock imagery.
 
 visual_terms = [
-
-    topic,
-
     title,
-
-    f"{topic} photo",
-
-    f"{topic} close up",
-
-    f"{topic} history",
-
-    f"{topic} documentary",
-
     f"{title} photo",
-
-    f"{title} history",
-
+    f"{title} image",
+    topic,
+    f"{topic} photo",
+    f"{topic} history",
 ]
 
 
 # Remove duplicates.
-
 visual_terms = list(
-    dict.fromkeys(
-        visual_terms
-    )
+    dict.fromkeys(visual_terms)
 )
 
 
-# =========================================================
-# SAVE SELECTED FACT
-# =========================================================
+# ============================================================
+# SAVE
+# ============================================================
 
 selected = {
-
     "topic": topic,
-
     "title": title,
-
     "fact": fact,
-
     "visual_terms": visual_terms,
-
 }
 
-
 (WORK / "selected.json").write_text(
-
     json.dumps(
         selected,
         ensure_ascii=False,
-        indent=2
+        indent=2,
     ),
-
-    encoding="utf-8"
-
+    encoding="utf-8",
 )
 
 
-# =========================================================
-# SAVE SCRIPT
-# =========================================================
+# ============================================================
+# NARRATION
+# ============================================================
+
+lines = [
+    hook,
+    f"Here's the weird part about {title}.",
+    bridge1,
+    fact,
+    bridge2,
+    "And that's why this fact is so crazy.",
+    "Did you know that?",
+]
+
 
 (WORK / "script.txt").write_text(
-
     "\n".join(lines),
-
-    encoding="utf-8"
-
+    encoding="utf-8",
 )
 
 
-# =========================================================
-# PRINT RESULTS
-# =========================================================
+# ============================================================
+# OUTPUT
+# ============================================================
 
 print()
+print("=" * 60)
+print("FACT SELECTED")
+print("=" * 60)
 
-print(
-    "=" * 60
-)
-
-print(
-    "FACT SELECTED"
-)
-
-print(
-    "=" * 60
-)
-
-print(
-    "Topic:",
-    topic
-)
-
-print(
-    "Wikipedia source:",
-    title
-)
+print("Topic:", topic)
+print("Source:", title)
 
 print()
-
-print(
-    "NARRATION:"
-)
-
-print(
-    "\n".join(lines)
-)
-
+print("NARRATION:")
 print()
 
-print(
-    "VISUAL SEARCH TERMS:"
-)
+for line in lines:
+    print(line)
+
+print()
+print("VISUAL SEARCH TERMS:")
 
 for term in visual_terms:
+    print("-", term)
 
-    print(
-        "-",
-        term
-    )
-
-print(
-    "=" * 60
-)
-
-print(
-    "Generator completed successfully."
-)
-
-print(
-    "=" * 60
-)
+print("=" * 60)
