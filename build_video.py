@@ -1,141 +1,545 @@
+```python
 #!/usr/bin/env python3
-import json, os, re, shutil, subprocess, sys, math
+
+import json
+import re
+import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-WORK = ROOT / 'work'
-SCENES = WORK / 'scenes'
-SCENES.mkdir(exist_ok=True)
+
+# The project data is still stored here.
+WORK = ROOT / "viral_facts_long_v1" / "work"
+SCENES = WORK / "scenes"
+
+WORK.mkdir(parents=True, exist_ok=True)
+SCENES.mkdir(parents=True, exist_ok=True)
 
 FPS = 30
-W, H = 1920, 1080
+W = 1920
+H = 1080
 
 
 def run(cmd):
-    print('[FFMPEG]', ' '.join(map(str, cmd)))
+    print("[FFMPEG]", " ".join(map(str, cmd)), flush=True)
     subprocess.run(cmd, check=True)
 
 
 def duration(path):
-    p = subprocess.run(['ffprobe','-v','error','-show_entries','format=duration','-of','default=nw=1:nk=1',str(path)], capture_output=True, text=True)
-    return float(p.stdout.strip()) if p.stdout.strip() else 0.0
+    result = subprocess.run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=nw=1:nk=1",
+            str(path),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    try:
+        return float(result.stdout.strip())
+    except Exception:
+        return 0.0
 
 
-def words(s):
-    return re.findall(r"\b[\w'’-]+\b", s)
+def words(text):
+    return re.findall(r"\b[\w'’-]+\b", text)
 
 
 def build_scenes():
-    script = json.loads((WORK/'script.json').read_text(encoding='utf-8'))
-    assets = json.loads((WORK/'assets.json').read_text(encoding='utf-8')).get('assets', [])
-    narration = WORK/'narration.wav'
-    total = duration(narration)
-    text = script['script']
-    chunks = re.split(r'(?<=[.!?])\s+', text)
-    chunks = [x.strip() for x in chunks if x.strip()]
+    script_path = WORK / "script.json"
+    assets_path = WORK / "assets.json"
+    narration_path = WORK / "narration.wav"
 
-    # Group sentences into ~7–10 sec scenes using word counts.
-    target_seconds = 8.0
-    wpm = max(115, min(170, len(words(text)) / max(total, 1) * 60))
-    target_words = max(15, round(target_seconds * wpm / 60))
-    grouped, cur, count = [], [], 0
-    for sentence in chunks:
-        wc = len(words(sentence))
-        cur.append(sentence); count += wc
+    script = json.loads(script_path.read_text(encoding="utf-8"))
+
+    assets = []
+    if assets_path.exists():
+        assets = json.loads(
+            assets_path.read_text(encoding="utf-8")
+        ).get("assets", [])
+
+    total = duration(narration_path)
+
+    if total <= 0:
+        raise RuntimeError("Could not determine narration duration.")
+
+    text = script.get("script", "").strip()
+
+    if not text:
+        raise RuntimeError("script.json contains no script.")
+
+    sentence_list = re.split(r"(?<=[.!?])\s+", text)
+    sentence_list = [s.strip() for s in sentence_list if s.strip()]
+
+    target_seconds = 7.5
+
+    script_word_count = len(words(text))
+    wpm = (script_word_count / total) * 60
+
+    wpm = max(115.0, min(175.0, wpm))
+    target_words = max(12, round(target_seconds * wpm / 60))
+
+    grouped = []
+    current = []
+    count = 0
+
+    for sentence in sentence_list:
+        sentence_words = len(words(sentence))
+
+        current.append(sentence)
+        count += sentence_words
+
         if count >= target_words:
-            grouped.append(' '.join(cur)); cur=[]; count=0
-    if cur: grouped.append(' '.join(cur))
+            grouped.append(" ".join(current))
+            current = []
+            count = 0
 
-    scenes=[]; cursor=0.0
-    for i, chunk in enumerate(grouped):
-        dur = total * (len(words(chunk)) / max(len(words(text)),1))
-        dur = max(3.2, dur)
-        asset = assets[i % len(assets)] if assets else None
-        scenes.append({'index':i,'start':cursor,'end':cursor+dur,'duration':dur,'narration':chunk,'asset':asset})
-        cursor += dur
+    if current:
+        grouped.append(" ".join(current))
 
-    (WORK/'scenes.json').write_text(json.dumps({'scenes':scenes,'duration':total}, indent=2, ensure_ascii=False), encoding='utf-8')
+    total_script_words = max(len(words(text)), 1)
+
+    scenes = []
+    cursor = 0.0
+
+    for index, chunk in enumerate(grouped):
+        chunk_words = len(words(chunk))
+
+        scene_duration = total * (
+            chunk_words / total_script_words
+        )
+
+        scene_duration = max(3.0, scene_duration)
+
+        asset = None
+
+        if assets:
+            asset = assets[index % len(assets)]
+
+        scene = {
+            "index": index,
+            "start": cursor,
+            "end": cursor + scene_duration,
+            "duration": scene_duration,
+            "narration": chunk,
+            "asset": asset,
+        }
+
+        scenes.append(scene)
+
+        cursor += scene_duration
+
+    scene_data = {
+        "duration": total,
+        "scenes": scenes,
+    }
+
+    (WORK / "scenes.json").write_text(
+        json.dumps(
+            scene_data,
+            indent=2,
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
     return scenes
 
 
 def render_scene(scene):
-    idx = scene['index']
-    out = SCENES / f'scene_{idx:03d}.mp4'
-    dur = scene['duration']
-    asset = scene.get('asset')
-    if not asset:
-        # Fallback dark background with title text.
-        title = json.loads((WORK/'script.json').read_text())['title'].replace(':','\\:').replace("'", "\\'")
-        vf = f"color=c=0x111111:s={W}x{H}:r={FPS},drawtext=text='{title}':fontcolor=white:fontsize=60:x=(w-text_w)/2:y=(h-text_h)/2"
-        run(['ffmpeg','-y','-f','lavfi','-i',vf,'-t',str(dur),'-c:v','libx264','-preset','veryfast','-pix_fmt','yuv420p',str(out)])
-        return out
-    img = asset['path']
-    # Ken Burns. Use only fast filters; captions are handled globally by ffmpeg.
-    frames = max(1, int(dur*FPS))
-    zoom = "zoompan=z='min(zoom+0.0007,1.10)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=1"
-    vf = f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},{zoom}:s={W}x{H}:fps={FPS},setsar=1"
-    run(['ffmpeg','-y','-loop','1','-i',img,'-vf',vf,'-frames:v',str(frames),'-an','-c:v','libx264','-preset','veryfast','-pix_fmt','yuv420p',str(out)])
-    return out
+    index = scene["index"]
+
+    output = SCENES / f"scene_{index:03d}.mp4"
+
+    scene_duration = float(scene["duration"])
+
+    asset = scene.get("asset")
+
+    if not asset or not asset.get("path"):
+        filter_graph = (
+            f"color=c=0x111111:s={W}x{H}:r={FPS},"
+            "format=yuv420p"
+        )
+
+        run(
+            [
+                "ffmpeg",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                filter_graph,
+                "-t",
+                str(scene_duration),
+                "-an",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "veryfast",
+                "-pix_fmt",
+                "yuv420p",
+                str(output),
+            ]
+        )
+
+        return output
+
+    image_path = Path(asset["path"])
+
+    if not image_path.exists():
+        print(
+            f"[WARN] Missing image: {image_path}. "
+            "Using fallback."
+        )
+
+        filter_graph = (
+            f"color=c=0x111111:s={W}x{H}:r={FPS},"
+            "format=yuv420p"
+        )
+
+        run(
+            [
+                "ffmpeg",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                filter_graph,
+                "-t",
+                str(scene_duration),
+                "-an",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "veryfast",
+                "-pix_fmt",
+                "yuv420p",
+                str(output),
+            ]
+        )
+
+        return output
+
+    frames = max(1, int(scene_duration * FPS))
+
+    zoom = (
+        "zoompan="
+        "z='min(zoom+0.0007,1.10)':"
+        "x='iw/2-(iw/zoom/2)':"
+        "y='ih/2-(ih/zoom/2)':"
+        f"d=1:s={W}x{H}:fps={FPS}"
+    )
+
+    filter_graph = (
+        f"scale={W}:{H}:"
+        "force_original_aspect_ratio=increase,"
+        f"crop={W}:{H},"
+        f"{zoom},"
+        "setsar=1"
+    )
+
+    run(
+        [
+            "ffmpeg",
+            "-y",
+            "-loop",
+            "1",
+            "-i",
+            str(image_path),
+            "-vf",
+            filter_graph,
+            "-frames:v",
+            str(frames),
+            "-an",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-pix_fmt",
+            "yuv420p",
+            str(output),
+        ]
+    )
+
+    return output
 
 
 def make_concat(scenes):
-    concat = WORK/'concat.txt'
-    with concat.open('w', encoding='utf-8') as f:
-        for s in scenes:
-            f.write("file '" + str(SCENES/f"scene_{s['index']:03d}.mp4").replace("'", "'\\''") + "'\n")
-    joined = WORK/'visuals.mp4'
-    run(['ffmpeg','-y','-f','concat','-safe','0','-i',str(concat),'-c','copy',str(joined)])
-    return joined
+    concat_file = WORK / "concat.txt"
+    visuals = WORK / "visuals.mp4"
+
+    with concat_file.open("w", encoding="utf-8") as file:
+        for scene in scenes:
+            scene_file = (
+                SCENES /
+                f"scene_{scene['index']:03d}.mp4"
+            )
+
+            escaped = str(scene_file).replace(
+                "'", "'\\''"
+            )
+
+            file.write(
+                f"file '{escaped}'\n"
+            )
+
+    run(
+        [
+            "ffmpeg",
+            "-y",
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            str(concat_file),
+            "-c",
+            "copy",
+            str(visuals),
+        ]
+    )
+
+    return visuals
+
+
+def timestamp(seconds):
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = seconds % 60
+
+    return (
+        f"{hours}:"
+        f"{minutes:02d}:"
+        f"{secs:05.2f}"
+    )
 
 
 def caption_file(scenes):
-    ass = WORK/'captions.ass'
-    def esc(t):
-        return t.replace('\\','\\\\').replace('{','\\{').replace('}','\\}')
-    def ts(sec):
-        h=int(sec//3600); m=int((sec%3600)//60); s=sec%60
-        return f'{h}:{m:02d}:{s:05.2f}'
-    with ass.open('w', encoding='utf-8') as f:
-        f.write('[Script Info]\nScriptType: v4.00+\nPlayResX: 1920\nPlayResY: 1080\n\n')
-        f.write('[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Alignment, MarginL, MarginR, MarginV, Encoding\n')
-        f.write('Style: Default,Arial,54,&H00FFFFFF,&H00FFFFFF,&H00101010,&H50000000,1,0,2,80,80,70,1\n\n')
-        f.write('[Events]\nFormat: Layer, Start, End, Style, Text\n')
-        for s in scenes:
-            text=s['narration'].strip()
-            # Split long narration into compact caption phrases.
-            ws=words(text); parts=[]
-            for i in range(0,len(ws),7): parts.append(' '.join(ws[i:i+7]))
-            span=s['duration']/max(1,len(parts))
-            for j,p in enumerate(parts):
-                a=s['start']+j*span; b=min(s['end'],a+span)
-                f.write(f'Dialogue: 0,{ts(a)},{ts(b)},Default,{esc(p)}\\N\n')
-    return ass
+    output = WORK / "captions.ass"
+
+    def escape(text):
+        return (
+            text
+            .replace("\\", "\\\\")
+            .replace("{", "\\{")
+            .replace("}", "\\}")
+        )
+
+    with output.open("w", encoding="utf-8") as file:
+        file.write(
+            "[Script Info]\n"
+            "ScriptType: v4.00+\n"
+            "PlayResX: 1920\n"
+            "PlayResY: 1080\n\n"
+        )
+
+        file.write(
+            "[V4+ Styles]\n"
+            "Format: Name, Fontname, Fontsize, "
+            "PrimaryColour, SecondaryColour, "
+            "OutlineColour, BackColour, Bold, Italic, "
+            "Alignment, MarginL, MarginR, MarginV, Encoding\n"
+        )
+
+        file.write(
+            "Style: Default,Arial,54,"
+            "&H00FFFFFF,&H00FFFFFF,&H00101010,"
+            "&H50000000,1,0,2,80,80,70,1\n\n"
+        )
+
+        file.write(
+            "[Events]\n"
+            "Format: Layer, Start, End, Style, Text\n"
+        )
+
+        for scene in scenes:
+            text = scene["narration"].strip()
+
+            token_list = words(text)
+
+            parts = [
+                " ".join(token_list[i:i + 7])
+                for i in range(
+                    0,
+                    len(token_list),
+                    7
+                )
+            ]
+
+            span = scene["duration"] / max(
+                len(parts),
+                1
+            )
+
+            for part_index, part in enumerate(parts):
+                start = (
+                    scene["start"]
+                    + part_index * span
+                )
+
+                end = min(
+                    scene["end"],
+                    start + span
+                )
+
+                file.write(
+                    "Dialogue: 0,"
+                    f"{timestamp(start)},"
+                    f"{timestamp(end)},"
+                    f"Default,"
+                    f"{escape(part)}"
+                    "\\N\n"
+                )
+
+    return output
 
 
-def final_render(visuals, ass):
-    out = WORK / 'final.mp4'
-    narration = WORK/'narration.wav'
-    music = WORK/'music.wav'
-    vf = f"ass={ass}"
+def final_render(visuals, captions):
+    output = WORK / "final.mp4"
+
+    narration = WORK / "narration.wav"
+    music = WORK / "music.wav"
+
+    if not narration.exists():
+        raise RuntimeError(
+            "narration.wav does not exist."
+        )
+
+    caption_filter = f"ass={captions}"
+
     if music.exists():
-        run(['ffmpeg','-y','-i',str(visuals),'-i',str(narration),'-i',str(music),'-filter_complex',
-             '[1:a]volume=1.0[n];[2:a]volume=0.08[m];[m][n]amix=inputs=2:duration=first:dropout_transition=2[a]',
-             '-vf',vf,'-map','0:v:0','-map','[a]','-c:v','libx264','-preset','veryfast','-crf','20','-c:a','aac','-b:a','160k','-shortest',str(out)])
+        run(
+            [
+                "ffmpeg",
+                "-y",
+                "-i",
+                str(visuals),
+                "-i",
+                str(narration),
+                "-i",
+                str(music),
+                "-filter_complex",
+                (
+                    "[1:a]volume=1.0[n];"
+                    "[2:a]volume=0.08[m];"
+                    "[m][n]"
+                    "amix=inputs=2:"
+                    "duration=first:"
+                    "dropout_transition=2[a]"
+                ),
+                "-vf",
+                caption_filter,
+                "-map",
+                "0:v:0",
+                "-map",
+                "[a]",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "veryfast",
+                "-crf",
+                "20",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "160k",
+                "-shortest",
+                str(output),
+            ]
+        )
     else:
-        run(['ffmpeg','-y','-i',str(visuals),'-i',str(narration),'-vf',vf,'-map','0:v:0','-map','1:a:0','-c:v','libx264','-preset','veryfast','-crf','20','-c:a','aac','-b:a','160k','-shortest',str(out)])
-    return out
+        run(
+            [
+                "ffmpeg",
+                "-y",
+                "-i",
+                str(visuals),
+                "-i",
+                str(narration),
+                "-vf",
+                caption_filter,
+                "-map",
+                "0:v:0",
+                "-map",
+                "1:a:0",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "veryfast",
+                "-crf",
+                "20",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "160k",
+                "-shortest",
+                str(output),
+            ]
+        )
+
+    return output
 
 
 def main():
-    scenes=build_scenes()
-    for s in scenes:
-        render_scene(s)
-    visuals=make_concat(scenes)
-    ass=caption_file(scenes)
-    out=final_render(visuals,ass)
-    report={'output':str(out),'duration':duration(out),'scenes':len(scenes)}
-    (WORK/'report.json').write_text(json.dumps(report,indent=2),encoding='utf-8')
-    print(json.dumps(report))
+    print(
+        f"[INFO] Work directory: {WORK}",
+        flush=True
+    )
 
-if __name__=='__main__':
+    scenes = build_scenes()
+
+    print(
+        f"[INFO] Rendering {len(scenes)} scenes...",
+        flush=True
+    )
+
+    for number, scene in enumerate(
+        scenes,
+        start=1
+    ):
+        print(
+            f"[SCENE {number}/{len(scenes)}] "
+            f"{scene['duration']:.1f}s",
+            flush=True
+        )
+
+        render_scene(scene)
+
+    visuals = make_concat(scenes)
+    captions = caption_file(scenes)
+
+    output = final_render(
+        visuals,
+        captions
+    )
+
+    report = {
+        "output": str(output),
+        "duration": duration(output),
+        "scenes": len(scenes),
+    }
+
+    (WORK / "report.json").write_text(
+        json.dumps(
+            report,
+            indent=2
+        ),
+        encoding="utf-8"
+    )
+
+    print(
+        json.dumps(report),
+        flush=True
+    )
+
+
+if __name__ == "__main__":
     main()
+```
